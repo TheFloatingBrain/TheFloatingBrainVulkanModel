@@ -4,6 +4,9 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+
+const unsigned short NVDIA_VENDOR_ID_CONSTANT = 4318;
+
 #define NDEBUG
 
 #ifdef NDEBUG
@@ -27,6 +30,8 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallBack( VkDebugUtilsMessageSeverity
 void Initialize( unsigned int width_, unsigned int height_, std::string title );
 void InitializeGLFW( unsigned int width_, unsigned int height_, std::string title );
 void InitializeVulkan( std::string name );
+void CreateInstance( std::string name );
+void GrabPhysicalDevices( const VkInstance& toGrabFrom );
 void PrintAvailibleExtensions();
 VkResult InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers );
 bool Update();
@@ -52,6 +57,7 @@ uint32_t glfwExtensionCount = 0;
 VkDebugUtilsMessengerEXT debugMessenger;
 PFN_vkCreateDebugUtilsMessengerEXT createFunction;
 PFN_vkDestroyDebugUtilsMessengerEXT destroyFunction;
+std::vector< VkPhysicalDevice > allPhysicalDevices;
 
 
 void Initialize( unsigned int width_, unsigned int height_, std::string title ) {
@@ -77,7 +83,11 @@ void PrintAvailibleExtensions()
 	for(const auto& currentExtension : extensions)
 		std::cout << "\t" << currentExtension.extensionName << "\n";
 }
-void InitializeVulkan( std::string name )
+void InitializeVulkan( std::string name ) {
+	CreateInstance( name );
+	GrabPhysicalDevices( instance );
+}
+void CreateInstance( std::string name )
 {
 	std::vector< const char* > validationLayers{ "VK_LAYER_KHRONOS_validation" };
 	applicationInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -116,6 +126,40 @@ void InitializeVulkan( std::string name )
 		std::cout << "Note::InitializeVulkan( std::string ):void: GLFW Supports Vulkan\n";
 	else
 		std::cout << "Error::InitializeVulkan( std::string ):void: GLFW Does Not Support Vulkan\n";
+}
+void GrabPhysicalDevices( const VkInstance& toGrabFrom )
+{
+	VkPhysicalDeviceProperties deviceProperties;
+	VkPhysicalDeviceFeatures deviceFeatures;
+	uint32_t amountOfAvailiblePhysicalDevices;
+	vkEnumeratePhysicalDevices( instance, &amountOfAvailiblePhysicalDevices, nullptr );
+	std::cout << "Note::GrabPhysicalDevice( const VkInstance& toGrabFrom ):void: Amount of Physical Devices Availible: " << amountOfAvailiblePhysicalDevices << ".\n";
+	if( amountOfAvailiblePhysicalDevices == 0 ) {
+		std::cerr << "Error::GrabPhysicalDevice( const VkInstance& toGrabFrom ):void: No availible physical devices.\n";
+		return;
+	}
+	allPhysicalDevices.clear();
+	allPhysicalDevices.resize( amountOfAvailiblePhysicalDevices );
+	vkEnumeratePhysicalDevices( instance, &amountOfAvailiblePhysicalDevices, allPhysicalDevices.data() );
+	std::cout << "Note::GrabPhysicalDevice( const VkInstance& toGrabFrom ):void: Found devices:\n";
+	int nvidia = -1;
+	const unsigned int AMOUNT_OF_DEVICES_CONSTANT = allPhysicalDevices.size();
+	for( unsigned int i = 0; i < AMOUNT_OF_DEVICES_CONSTANT; ++i )
+	{
+		vkGetPhysicalDeviceProperties( allPhysicalDevices[ i ], &deviceProperties );
+		vkGetPhysicalDeviceFeatures( allPhysicalDevices[ i ], &deviceFeatures );
+		std::cout << "\t* : Device Name: " << deviceProperties.deviceName << "\n";
+		if( deviceProperties.vendorID == NVDIA_VENDOR_ID_CONSTANT ) {
+			std::cout << "\t\t--> This is an NVDIA device\n";
+			nvidia = i;
+		}
+	}
+	if( nvidia != ( -1 ) ) 
+	{
+		VkPhysicalDevice toSwap = allPhysicalDevices[ AMOUNT_OF_DEVICES_CONSTANT - 1 ];
+		allPhysicalDevices[ AMOUNT_OF_DEVICES_CONSTANT - 1 ] = allPhysicalDevices[ nvidia ];
+		allPhysicalDevices[ nvidia ] = toSwap;
+	}
 }
 VkResult InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers )
 {
