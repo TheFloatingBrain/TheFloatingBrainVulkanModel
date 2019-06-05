@@ -46,8 +46,12 @@ VkInstance instance;
 VkApplicationInfo applicationInfo = {};
 VkInstanceCreateInfo createInfo = {};
 
+VkDebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo = {};
 const char** glfwExtensions;
 uint32_t glfwExtensionCount = 0;
+VkDebugUtilsMessengerEXT debugMessenger;
+PFN_vkCreateDebugUtilsMessengerEXT createFunction;
+PFN_vkDestroyDebugUtilsMessengerEXT destroyFunction;
 
 
 void Initialize( unsigned int width_, unsigned int height_, std::string title ) {
@@ -115,10 +119,6 @@ void InitializeVulkan( std::string name )
 }
 VkResult InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers )
 {
-	VkDebugUtilsMessengerEXT debugMessenger;
-
-	VkDebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo = {};
-
 	debugMessengerCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
 	debugMessengerCreateInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
 		VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
@@ -129,17 +129,19 @@ VkResult InitializeVulkanDebugLayer( std::vector< const char* >&& validationLaye
 
 	uint32_t layerCount;
 	vkEnumerateInstanceLayerProperties( &layerCount, nullptr );
-
 	std::vector< VkLayerProperties > availableLayers( layerCount );
 	vkEnumerateInstanceLayerProperties( &layerCount, availableLayers.data() );
+	std::cout << "Note::InitializeVulkanDebugLayer():VkResult: Availible layer count is " << layerCount << ".\n";
 
 	for( const char* layerName : validationLayers )
 	{
 		bool layerFound = false;
 		for( const auto& layerProperties : availableLayers )
 		{
-			if( strcmp( layerName, layerProperties.layerName ) == 0 ) {
+			if( strcmp( layerName, layerProperties.layerName ) == 0 )
+			{
 				layerFound = true;
+				std::cout << "Note::InitializeVulkanDebugLayer():VkResult: Comfirmed layer " << layerProperties.layerName << "\n";
 				break;
 			}
 		}
@@ -151,11 +153,12 @@ VkResult InitializeVulkanDebugLayer( std::vector< const char* >&& validationLaye
 	}
 
 
-	auto function = ( PFN_vkCreateDebugUtilsMessengerEXT ) vkGetInstanceProcAddr( instance, "vkCreateDebugUtilsMessengerEXT" );
+	createFunction = ( PFN_vkCreateDebugUtilsMessengerEXT ) vkGetInstanceProcAddr( instance, "vkCreateDebugUtilsMessengerEXT" );
 
+	destroyFunction = ( PFN_vkDestroyDebugUtilsMessengerEXT ) vkGetInstanceProcAddr( instance, "vkDestroyDebugUtilsMessengerEXT" );
 
-	if( function != nullptr )
-		return function( instance, &debugMessengerCreateInfo, nullptr, &debugMessenger );
+	if( createFunction != nullptr )
+		return createFunction( instance, &debugMessengerCreateInfo, nullptr, &debugMessenger );
 	else {
 		std::cerr << "Error::InitializeVulkanDebugLayer():VkResult: vkCreateDebugUtilsMessengerEXT function is null.\n";
 		return VK_ERROR_EXTENSION_NOT_PRESENT;
@@ -172,7 +175,10 @@ bool GLFWUpdate()
 	}
 	return false;
 }
-void Destroy() {
+void Destroy()
+{
+	if(debug == true)
+		destroyFunction( instance, debugMessenger, nullptr );
 	vkDestroyInstance( instance, nullptr );
 	glfwDestroyWindow( window );
 	glfwTerminate();
