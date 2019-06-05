@@ -33,6 +33,7 @@ struct Application
 	void InitializeVulkan( std::string name, const VkInstance& instance );
 	void CreateInstance( std::string name, const VkInstance& instance );
 	void GrabPhysicalDevices( const VkInstance& toGrabFrom );
+	size_t CreateLogicalDevice( const VkInstance& instance, const VkPhysicalDevice& physicalDevice );
 	void PrintAvailibleExtensions( const VkInstance& instance );
 	VkResult InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers, const VkInstance& instance );
 	bool Update();
@@ -51,8 +52,10 @@ struct Application
 		PFN_vkCreateDebugUtilsMessengerEXT createFunction;
 		PFN_vkDestroyDebugUtilsMessengerEXT destroyFunction;
 		std::vector< VkPhysicalDevice > allPhysicalDevices;
+		std::vector< std::pair< VkDevice, uint32_t > > logicalDevices;
 		unsigned int width = 800;
 		unsigned int height = 600;
+		float queuePriority = 1.0f;
 };
 
 int main()
@@ -93,9 +96,13 @@ void Application::PrintAvailibleExtensions( const VkInstance& instance )
 	for(const auto& currentExtension : extensions)
 		std::cout << "\t" << currentExtension.extensionName << "\n";
 }
-void Application::InitializeVulkan( std::string name, const VkInstance& instance ) {
+void Application::InitializeVulkan( std::string name, const VkInstance& instance )
+{
 	CreateInstance( name, instance );
-	GrabPhysicalDevices( instance );
+	if( allPhysicalDevices.size() == 0 )
+		GrabPhysicalDevices( instance );
+	CreateLogicalDevice( instance, allPhysicalDevices[ allPhysicalDevices.size() - 1 ] );
+	allPhysicalDevices.pop_back();
 }
 void Application::CreateInstance( std::string name, const VkInstance& instance )
 {
@@ -171,6 +178,46 @@ void Application::GrabPhysicalDevices( const VkInstance& toGrabFrom )
 		allPhysicalDevices[ nvidia ] = toSwap;
 	}
 }
+
+size_t Application::CreateLogicalDevice( const VkInstance& instance, const VkPhysicalDevice& physicalDevice )
+{
+	uint32_t queueFamilyCount = 0;
+	std::vector< VkQueueFamilyProperties > queueFamilies;
+	VkDeviceQueueCreateInfo queueCreateInfo = {};
+	VkPhysicalDeviceFeatures deviceFeatures = {};
+	VkDeviceCreateInfo logicalDeviceCreationInfo = {};
+	VkDevice logicalDevice;
+	unsigned int queueFamilyIndex = -1;
+	logicalDeviceCreationInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+	vkGetPhysicalDeviceQueueFamilyProperties( physicalDevice, &queueFamilyCount, nullptr );
+	queueFamilies.resize( queueFamilyCount );
+	vkGetPhysicalDeviceQueueFamilyProperties( physicalDevice, &queueFamilyCount, queueFamilies.data() );
+	queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+	const size_t AMOUNT_OF_QUEUE_FAMILIES_CONSTANT = queueFamilies.size();
+	std::cout << "Note::CreateLogicalDevice( const VkInstance&, const VkPhysicalDevice& ):void: Amount of queue families is " << AMOUNT_OF_QUEUE_FAMILIES_CONSTANT << ".\n";
+	for( unsigned int i = 0; i < AMOUNT_OF_QUEUE_FAMILIES_CONSTANT; ++i )
+	{
+		if(queueFamilies[ i ].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+			queueFamilyIndex = i;
+			break;
+		}
+	}
+	if( queueFamilyIndex == -1 )
+		std::cerr << "Error::CreateLogicalDevice( const VkInstance&, const VkPhysicalDevice& ):void: Failed to find suitable queue family.\n";
+	queueCreateInfo.queueFamilyIndex = queueFamilyIndex;
+	queueCreateInfo.queueCount = 1;
+	queueCreateInfo.pQueuePriorities = &queuePriority;
+	logicalDeviceCreationInfo.pQueueCreateInfos = &queueCreateInfo;
+	logicalDeviceCreationInfo.queueCreateInfoCount = 1;
+	logicalDeviceCreationInfo.pEnabledFeatures = &deviceFeatures;
+	if( vkCreateDevice( physicalDevice, &logicalDeviceCreationInfo, nullptr, &logicalDevice ) != VK_SUCCESS ) {
+		std::cerr << "Error::CreateLogicalDevice( const VkInstance&, const VkPhysicalDevice& ):void: Failed to create logic device.\n";
+		logicalDevice = VK_NULL_HANDLE;
+	}
+	logicalDevices.push_back( std::pair< VkDevice, int >{ logicalDevice, queueFamilyIndex } );
+	return ( logicalDevices.size() - 1 );
+}
+
 VkResult Application::InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers, const VkInstance& instance )
 {
 	debugMessengerCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -240,6 +287,9 @@ void Application::Destroy()
 	const size_t AMOUNT_OF_INSTANCES_CONSTANT = instances.size();
 	for( unsigned int i = 0; i < AMOUNT_OF_INSTANCES_CONSTANT; ++i )
 		DestroyInstance( instances[ i ] );
+	const size_t AMOUNT_OF_LOGICAL_DEVICES_CONSTANT = logicalDevices.size();
+	for( unsigned int i = 0; i < AMOUNT_OF_LOGICAL_DEVICES_CONSTANT; ++i )
+		vkDestroyDevice( logicalDevices[ i ].first, nullptr );
 	glfwDestroyWindow( window );
 	glfwTerminate();
 }
