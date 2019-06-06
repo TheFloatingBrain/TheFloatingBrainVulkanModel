@@ -284,12 +284,12 @@ void Application::DestroyInstance( const VkInstance& instance )
 }
 void Application::Destroy()
 {
-	const size_t AMOUNT_OF_INSTANCES_CONSTANT = instances.size();
-	for( unsigned int i = 0; i < AMOUNT_OF_INSTANCES_CONSTANT; ++i )
-		DestroyInstance( instances[ i ] );
 	const size_t AMOUNT_OF_LOGICAL_DEVICES_CONSTANT = logicalDevices.size();
 	for( unsigned int i = 0; i < AMOUNT_OF_LOGICAL_DEVICES_CONSTANT; ++i )
 		vkDestroyDevice( logicalDevices[ i ].first, nullptr );
+	const size_t AMOUNT_OF_INSTANCES_CONSTANT = instances.size();
+	for( unsigned int i = 0; i < AMOUNT_OF_INSTANCES_CONSTANT; ++i )
+		DestroyInstance( instances[ i ] );
 	glfwDestroyWindow( window );
 	glfwTerminate();
 }
