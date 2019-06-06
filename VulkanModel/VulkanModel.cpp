@@ -17,20 +17,35 @@ const unsigned short NVDIA_VENDOR_ID_CONSTANT = 4318;
 
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallBack( VkDebugUtilsMessageSeverityFlagBitsEXT messageSverity,
-	VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* callBackData,
-	void* userData )
-{
+		VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* callBackData,
+		void* userData ) {
 	std::cerr << "Message::Vulkan::ValidationLayer: " << callBackData->pMessage << "\n";
-
 	return VK_FALSE;
 }
 
+struct Surface {
+	VkSurfaceKHR surface;
+	GLFWwindow* window = nullptr;
+};
+
+struct Instance {
+	VkInstance instance;
+	std::vector< std::unique_ptr< Surface > > surfaces;
+};
+
+
+struct WindowInformation {
+	std::string title;
+	unsigned int width, height;
+};
+
 struct Application
 {
-	Application( unsigned int width_, unsigned int height_, std::string title, unsigned int amountOfInstances );
-	void Initialize( unsigned int width_, unsigned int height_, std::string title, unsigned int amountOfInstances );
-	void InitializeGLFW( unsigned int width_, unsigned int height_, std::string title );
-	void InitializeVulkan( std::string name, const VkInstance& instance );
+	explicit Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate );
+	explicit Application( std::string title, unsigned int width, unsigned int height );
+	void Initialize( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate = nullptr, size_t amountOfWindowsToCreate = 0 );
+	void InitializeGLFW( GLFWwindow** window, unsigned int width, unsigned int height, std::string title );
+	void InitializeVulkan( std::string name, const Instance& instance, unsigned int width_ = 0, unsigned int height_ = 0 );
 	void CreateInstance( std::string name, const VkInstance& instance );
 	void GrabPhysicalDevices( const VkInstance& toGrabFrom );
 	size_t CreateLogicalDevice( const VkInstance& instance, const VkPhysicalDevice& physicalDevice );
@@ -41,8 +56,7 @@ struct Application
 	void Destroy();
 	void DestroyInstance( const VkInstance& instance );
 	protected:
-		GLFWwindow* window;
-		std::vector< VkInstance > instances;
+		std::vector< Instance > instancesAndSurfaces;
 		VkApplicationInfo applicationInfo = {};
 		VkInstanceCreateInfo createInfo = {};
 		VkDebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo = {};
@@ -53,38 +67,44 @@ struct Application
 		PFN_vkDestroyDebugUtilsMessengerEXT destroyFunction;
 		std::vector< VkPhysicalDevice > allPhysicalDevices;
 		std::vector< std::pair< VkDevice, uint32_t > > logicalDevices;
-		unsigned int width = 800;
-		unsigned int height = 600;
 		float queuePriority = 1.0f;
 };
 
 int main()
 {
-	Application application{ 800, 600, "Vulkan Example", 1 };
+	Application application{ "Vulkan Example", 800, 600 };
 	while( application.Update() );
 	application.Destroy();
 	return 0;
 }
+const std::string DEFAULT_WINDOW_TITLE_CONSTANT = "Vulkan Surface Window";
 
-Application::Application( unsigned int width_, unsigned int height_, std::string title, unsigned int amountOfInstances ) {
-	Initialize( width_, height_, title, amountOfInstances );
+Application::Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate ) {
+	Initialize( amountOfInstancesToCreate, windowsToCreate, amountOfWindowsToCreate );
 }
-
-void Application::Initialize( unsigned int width_, unsigned int height_, std::string title, unsigned int amountOfInstances )
-{
-	InitializeGLFW( width_, height_, title );
-	instances.resize( amountOfInstances );
-	for( unsigned int i = 0; i < amountOfInstances; ++i )
-		InitializeVulkan( title, instances[ i ] );
+Application::Application( std::string title, unsigned int width, unsigned int height ) {
+	WindowInformation windowInformation{ title, width, height };
+	Initialize( 1, &windowInformation, 1 );
 }
-void Application::InitializeGLFW( unsigned int width_, unsigned int height_, std::string title )
+void Application::Initialize( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate )
 {
-	width = width_;
-	height = height_;
+	instancesAndSurfaces.resize( amountOfInstancesToCreate );
+	for( unsigned int i = 0; i < amountOfInstancesToCreate; ++i )
+	{
+		if( i < amountOfWindowsToCreate ) {
+			InitializeVulkan( windowsToCreate[ i ].title,
+				instancesAndSurfaces[ i ], windowsToCreate[ i ].width, windowsToCreate[ i ].height );
+		}
+		else
+			InitializeVulkan( DEFAULT_WINDOW_TITLE_CONSTANT, instancesAndSurfaces[ i ] );
+	}
+}
+void Application::InitializeGLFW( GLFWwindow** window, unsigned int width, unsigned int height, std::string title )
+{
 	glfwInit();
 	glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
 	glfwWindowHint( GLFW_RESIZABLE, GLFW_FALSE );
-	window = glfwCreateWindow( width, height, title.c_str(), nullptr, nullptr );
+	*window = glfwCreateWindow( width, height, title.c_str(), nullptr, nullptr );
 }
 void Application::PrintAvailibleExtensions( const VkInstance& instance )
 {
@@ -96,13 +116,24 @@ void Application::PrintAvailibleExtensions( const VkInstance& instance )
 	for(const auto& currentExtension : extensions)
 		std::cout << "\t" << currentExtension.extensionName << "\n";
 }
-void Application::InitializeVulkan( std::string name, const VkInstance& instance )
+void Application::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height )
 {
-	CreateInstance( name, instance );
+	CreateInstance( name, instance.instance );
 	if( allPhysicalDevices.size() == 0 )
-		GrabPhysicalDevices( instance );
-	CreateLogicalDevice( instance, allPhysicalDevices[ allPhysicalDevices.size() - 1 ] );
+		GrabPhysicalDevices( instance.instance );
+	CreateLogicalDevice( instance.instance, allPhysicalDevices[ allPhysicalDevices.size() - 1 ] );
 	allPhysicalDevices.pop_back();
+	if( width != 0 || height != 0 )
+	{
+		( ( Instance& ) instance ).surfaces.push_back( std::make_unique< Surface >() );
+		Surface* surface = instance.surfaces[ instance.surfaces.size() - 1 ].get();
+		InitializeGLFW( &surface->window, width, height, name );
+		glfwCreateWindowSurface( instance.instance, surface->window, nullptr, &surface->surface );
+		if( glfwVulkanSupported() )
+			std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Supports Vulkan!\n";
+		else
+			std::cout << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Does Not Support Vulkan!\n";
+	}
 }
 void Application::CreateInstance( std::string name, const VkInstance& instance )
 {
@@ -124,25 +155,22 @@ void Application::CreateInstance( std::string name, const VkInstance& instance )
 
 	enabledExtensions.push_back( VK_EXT_DEBUG_REPORT_EXTENSION_NAME );
 	enabledExtensions.push_back( VK_EXT_DEBUG_UTILS_EXTENSION_NAME );
+	enabledExtensions.push_back( VK_KHR_SURFACE_EXTENSION_NAME );
 
 	createInfo.enabledExtensionCount = enabledExtensions.size();
 	createInfo.ppEnabledExtensionNames = enabledExtensions.data();
 
-	if(vkCreateInstance( &createInfo, nullptr, &( ( VkInstance& ) instance ) ) != VK_SUCCESS) {
-		std::cerr << "Error::InitializeVulkan( std::string ):void: Failed to create instance.\n";
+	if( vkCreateInstance( &createInfo, nullptr, &( ( VkInstance& ) instance ) ) != VK_SUCCESS ) {
+		std::cerr << "Error::InitializeVulkan( std::string, const VkInstance& instance ):void: Failed to create instance.\n";
 		return;
 	}
 	if( debug == true )
 	{
-		std::cout << "Note::InitializeVulkan( std::string ):void: Debug mode, enabling validation layers.\n";
+		std::cout << "Note::InitializeVulkan( std::string, const VkInstance& instance ):void: Debug mode, enabling validation layers.\n";
 		auto result = InitializeVulkanDebugLayer( std::move( validationLayers ), instance );
 		if( result == VK_SUCCESS )
-			std::cout << "Note::InitializeVulkan( std::string ):void: Debug layer creation succesful!\n";
+			std::cout << "Note::InitializeVulkan( std::string, const VkInstance& instance ):void: Debug layer creation succesful!\n";
 	}
-	if(glfwVulkanSupported())
-		std::cout << "Note::InitializeVulkan( std::string ):void: GLFW Supports Vulkan!\n";
-	else
-		std::cout << "Error::InitializeVulkan( std::string ):void: GLFW Does Not Support Vulkan!\n";
 }
 void Application::GrabPhysicalDevices( const VkInstance& toGrabFrom )
 {
@@ -178,7 +206,6 @@ void Application::GrabPhysicalDevices( const VkInstance& toGrabFrom )
 		allPhysicalDevices[ nvidia ] = toSwap;
 	}
 }
-
 size_t Application::CreateLogicalDevice( const VkInstance& instance, const VkPhysicalDevice& physicalDevice )
 {
 	uint32_t queueFamilyCount = 0;
@@ -217,7 +244,6 @@ size_t Application::CreateLogicalDevice( const VkInstance& instance, const VkPhy
 	logicalDevices.push_back( std::pair< VkDevice, int >{ logicalDevice, queueFamilyIndex } );
 	return ( logicalDevices.size() - 1 );
 }
-
 VkResult Application::InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers, const VkInstance& instance )
 {
 	debugMessengerCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -270,11 +296,21 @@ bool Application::Update() {
 }
 bool Application::GLFWUpdate()
 {
-	if(glfwWindowShouldClose( window ) == false) {
-		glfwPollEvents();
-		return true;
+	bool run = false;
+	for( const Instance& currentInstance : instancesAndSurfaces )
+	{
+		for( const std::unique_ptr< Surface >& currentSurface : currentInstance.surfaces )
+		{
+			if( currentSurface->window != nullptr )
+			{
+				if( glfwWindowShouldClose( currentSurface->window ) == false ) {
+					glfwPollEvents();
+					run = true;
+				}
+			}
+		}
 	}
-	return false;
+	return run;
 }
 void Application::DestroyInstance( const VkInstance& instance )
 {
@@ -287,9 +323,17 @@ void Application::Destroy()
 	const size_t AMOUNT_OF_LOGICAL_DEVICES_CONSTANT = logicalDevices.size();
 	for( unsigned int i = 0; i < AMOUNT_OF_LOGICAL_DEVICES_CONSTANT; ++i )
 		vkDestroyDevice( logicalDevices[ i ].first, nullptr );
-	const size_t AMOUNT_OF_INSTANCES_CONSTANT = instances.size();
+	const size_t AMOUNT_OF_INSTANCES_CONSTANT = instancesAndSurfaces.size();
 	for( unsigned int i = 0; i < AMOUNT_OF_INSTANCES_CONSTANT; ++i )
-		DestroyInstance( instances[ i ] );
-	glfwDestroyWindow( window );
+	{
+		const size_t AMOUNT_OF_SURFACES_CONSTANT = instancesAndSurfaces[ i ].surfaces.size();
+		for( unsigned int j = 0; j < AMOUNT_OF_SURFACES_CONSTANT; ++j )
+		{
+			vkDestroySurfaceKHR( instancesAndSurfaces[ i ].instance,
+				instancesAndSurfaces[ i ].surfaces[ j ]->surface, nullptr );
+			glfwDestroyWindow( instancesAndSurfaces[ i ].surfaces[ j ]->window );
+		}
+		DestroyInstance( instancesAndSurfaces[ i ].instance );
+	}
 	glfwTerminate();
 }
