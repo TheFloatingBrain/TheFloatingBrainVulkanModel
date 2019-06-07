@@ -15,6 +15,10 @@ const unsigned short NVDIA_VENDOR_ID_CONSTANT = 4318;
 	bool debug = false;
 #endif
 
+#ifdef WIN32
+	#define PLATFORM_SURFACE_EXTENSION_NAME_MACRO "VK_KHR_win32_surface"
+#endif
+//To be continued...//
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallBack( VkDebugUtilsMessageSeverityFlagBitsEXT messageSverity,
 		VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* callBackData,
@@ -28,9 +32,19 @@ struct Surface {
 	GLFWwindow* window = nullptr;
 };
 
-struct Instance {
+struct LogicalDevice
+{
+	VkDevice logicalDevice;
+	uint32_t queue;
+	VkPhysicalDevice physicalDevice;
+};
+
+struct Instance
+{
 	VkInstance instance;
 	std::vector< std::unique_ptr< Surface > > surfaces;
+	std::vector< VkPhysicalDevice > physicalDevices;
+	std::vector< LogicalDevice > logicalDevices;
 };
 
 
@@ -44,11 +58,11 @@ struct Application
 	explicit Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate );
 	explicit Application( std::string title, unsigned int width, unsigned int height );
 	void Initialize( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate = nullptr, size_t amountOfWindowsToCreate = 0 );
-	void InitializeGLFW( GLFWwindow** window, unsigned int width, unsigned int height, std::string title );
+	GLFWwindow* InitializeGLFW( unsigned int width, unsigned int height, std::string title );
 	void InitializeVulkan( std::string name, const Instance& instance, unsigned int width_ = 0, unsigned int height_ = 0 );
 	void CreateInstance( std::string name, const VkInstance& instance );
 	void GrabPhysicalDevices( const VkInstance& toGrabFrom );
-	size_t CreateLogicalDevice( const VkInstance& instance, const VkPhysicalDevice& physicalDevice );
+	size_t CreateLogicalDevice( const Instance& instance, const VkPhysicalDevice& physicalDevice );
 	void PrintAvailibleExtensions( const VkInstance& instance );
 	VkResult InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers, const VkInstance& instance );
 	bool Update();
@@ -66,7 +80,6 @@ struct Application
 		PFN_vkCreateDebugUtilsMessengerEXT createFunction;
 		PFN_vkDestroyDebugUtilsMessengerEXT destroyFunction;
 		std::vector< VkPhysicalDevice > allPhysicalDevices;
-		std::vector< std::pair< VkDevice, uint32_t > > logicalDevices;
 		float queuePriority = 1.0f;
 };
 
@@ -99,12 +112,12 @@ void Application::Initialize( size_t amountOfInstancesToCreate, WindowInformatio
 			InitializeVulkan( DEFAULT_WINDOW_TITLE_CONSTANT, instancesAndSurfaces[ i ] );
 	}
 }
-void Application::InitializeGLFW( GLFWwindow** window, unsigned int width, unsigned int height, std::string title )
+GLFWwindow* Application::InitializeGLFW(unsigned int width, unsigned int height, std::string title )
 {
 	glfwInit();
 	glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
 	glfwWindowHint( GLFW_RESIZABLE, GLFW_FALSE );
-	*window = glfwCreateWindow( width, height, title.c_str(), nullptr, nullptr );
+	return glfwCreateWindow( width, height, title.c_str(), nullptr, nullptr );
 }
 void Application::PrintAvailibleExtensions( const VkInstance& instance )
 {
@@ -121,18 +134,35 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 	CreateInstance( name, instance.instance );
 	if( allPhysicalDevices.size() == 0 )
 		GrabPhysicalDevices( instance.instance );
-	CreateLogicalDevice( instance.instance, allPhysicalDevices[ allPhysicalDevices.size() - 1 ] );
+	VkPhysicalDevice physicalDevice = allPhysicalDevices[ allPhysicalDevices.size() - 1 ];
 	allPhysicalDevices.pop_back();
+	CreateLogicalDevice( instance, physicalDevice );
+	( ( Instance& ) instance ).physicalDevices.push_back( physicalDevice );
 	if( width != 0 || height != 0 )
 	{
 		( ( Instance& ) instance ).surfaces.push_back( std::make_unique< Surface >() );
-		Surface* surface = instance.surfaces[ instance.surfaces.size() - 1 ].get();
-		InitializeGLFW( &surface->window, width, height, name );
-		glfwCreateWindowSurface( instance.instance, surface->window, nullptr, &surface->surface );
-		if( glfwVulkanSupported() )
-			std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Supports Vulkan!\n";
+		const std::unique_ptr< Surface >& surface = instance.surfaces[ instance.surfaces.size() - 1 ];
+		surface->window = InitializeGLFW( width, height, name );
+		VkResult result = glfwCreateWindowSurface( instance.instance, surface->window, nullptr, &surface->surface );
+		if( result == VK_SUCCESS )
+		{
+			std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Surface creation successful!\n";
+			if( glfwVulkanSupported() )
+			{
+				std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Supports Vulkan!\n";
+				VkBool32 presentSupport = VK_FALSE;
+				auto& logicalDevice = instance.logicalDevices[ instance.logicalDevices.size() - 1 ];
+				vkGetPhysicalDeviceSurfaceSupportKHR( logicalDevice.physicalDevice, logicalDevice.queue, surface->surface, &presentSupport );
+				if( presentSupport == VK_TRUE )
+					std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: This device has present support.\n";
+				else
+					std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: This device does not have present support.\n";
+			}
+			else
+				std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Does Not Support Vulkan!\n";
+		}
 		else
-			std::cout << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Does Not Support Vulkan!\n";
+			std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Failed to create surface error: " << result << "\n";
 	}
 }
 void Application::CreateInstance( std::string name, const VkInstance& instance )
@@ -156,6 +186,8 @@ void Application::CreateInstance( std::string name, const VkInstance& instance )
 	enabledExtensions.push_back( VK_EXT_DEBUG_REPORT_EXTENSION_NAME );
 	enabledExtensions.push_back( VK_EXT_DEBUG_UTILS_EXTENSION_NAME );
 	enabledExtensions.push_back( VK_KHR_SURFACE_EXTENSION_NAME );
+	enabledExtensions.push_back( PLATFORM_SURFACE_EXTENSION_NAME_MACRO );
+	
 
 	createInfo.enabledExtensionCount = enabledExtensions.size();
 	createInfo.ppEnabledExtensionNames = enabledExtensions.data();
@@ -198,6 +230,7 @@ void Application::GrabPhysicalDevices( const VkInstance& toGrabFrom )
 			std::cout << "\t\t--> This is an NVDIA device\n";
 			nvidia = i;
 		}
+
 	}
 	if( nvidia != ( -1 ) ) 
 	{
@@ -206,7 +239,7 @@ void Application::GrabPhysicalDevices( const VkInstance& toGrabFrom )
 		allPhysicalDevices[ nvidia ] = toSwap;
 	}
 }
-size_t Application::CreateLogicalDevice( const VkInstance& instance, const VkPhysicalDevice& physicalDevice )
+size_t Application::CreateLogicalDevice( const Instance& instance, const VkPhysicalDevice& physicalDevice )
 {
 	uint32_t queueFamilyCount = 0;
 	std::vector< VkQueueFamilyProperties > queueFamilies;
@@ -241,8 +274,8 @@ size_t Application::CreateLogicalDevice( const VkInstance& instance, const VkPhy
 		std::cerr << "Error::CreateLogicalDevice( const VkInstance&, const VkPhysicalDevice& ):void: Failed to create logic device.\n";
 		logicalDevice = VK_NULL_HANDLE;
 	}
-	logicalDevices.push_back( std::pair< VkDevice, int >{ logicalDevice, queueFamilyIndex } );
-	return ( logicalDevices.size() - 1 );
+	( ( Instance& ) instance ).logicalDevices.push_back( LogicalDevice{ logicalDevice, queueFamilyIndex, physicalDevice } );
+	return ( instance.logicalDevices.size() - 1 );
 }
 VkResult Application::InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers, const VkInstance& instance )
 {
@@ -320,12 +353,12 @@ void Application::DestroyInstance( const VkInstance& instance )
 }
 void Application::Destroy()
 {
-	const size_t AMOUNT_OF_LOGICAL_DEVICES_CONSTANT = logicalDevices.size();
-	for( unsigned int i = 0; i < AMOUNT_OF_LOGICAL_DEVICES_CONSTANT; ++i )
-		vkDestroyDevice( logicalDevices[ i ].first, nullptr );
 	const size_t AMOUNT_OF_INSTANCES_CONSTANT = instancesAndSurfaces.size();
 	for( unsigned int i = 0; i < AMOUNT_OF_INSTANCES_CONSTANT; ++i )
 	{
+		const size_t AMOUNT_OF_LOGICAL_DEVICES_CONSTANT = instancesAndSurfaces[ i ].logicalDevices.size();
+		for( unsigned int j = 0; j < AMOUNT_OF_LOGICAL_DEVICES_CONSTANT; ++j )
+			vkDestroyDevice( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice, nullptr );
 		const size_t AMOUNT_OF_SURFACES_CONSTANT = instancesAndSurfaces[ i ].surfaces.size();
 		for( unsigned int j = 0; j < AMOUNT_OF_SURFACES_CONSTANT; ++j )
 		{
