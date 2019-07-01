@@ -40,7 +40,6 @@ struct Surface
 	VkSurfaceKHR surface;
 	GLFWwindow* window = nullptr;
 	VkSurfaceCapabilitiesKHR capabilities;
-	VkExtent2D extent;
 	std::vector< VkSurfaceFormatKHR > formats;
 	std::vector< VkPresentModeKHR > presentModes;
 };
@@ -50,6 +49,8 @@ struct SwapChain
 	VkSwapchainKHR swapChain;
 	VkSurfaceFormatKHR format;
 	VkPresentModeKHR presentMode;
+	VkExtent2D extent;
+	std::vector< VkImage > images;	
 };
 
 struct LogicalDevice
@@ -91,7 +92,8 @@ struct Application
 	SwapChain& CreateSwapchain( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
 	std::vector< VkSurfaceFormatKHR > FindDesiredFormats( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
 	std::vector< VkPresentModeKHR > FindDesiredPresentModes( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
-	void MakeExtent( const std::unique_ptr< Surface >& surface );
+	void MakeExtent( LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
+	std::vector< VkImage >& GetSwapchainImages( const LogicalDevice& logicalDevice );
 	bool Update();
 	bool GLFWUpdate();
 	void Destroy();
@@ -372,58 +374,8 @@ VkResult Application::InitializeVulkanDebugLayer( std::vector< const char* >&& v
 		return createFunction( instance, &debugMessengerCreateInfo, nullptr, &debugMessenger );
 	else {
 		std::cerr << "Error::InitializeVulkanDebugLayer():VkResult: vkCreateDebugUtilsMessengerEXT function is null.\n";
-		return VK_ERROR_EXTENSION_NOT_PRESENT;
+	return VK_ERROR_EXTENSION_NOT_PRESENT;
 	}
-}
-bool Application::Update() {
-	return GLFWUpdate();
-}
-bool Application::GLFWUpdate()
-{
-	bool run = false;
-	for( const Instance& currentInstance : instancesAndSurfaces )
-	{
-		for( const std::unique_ptr< Surface >& currentSurface : currentInstance.surfaces )
-		{
-			if( currentSurface->window != nullptr )
-			{
-				if( glfwWindowShouldClose( currentSurface->window ) == false ) {
-					glfwPollEvents();
-					run = true;
-				}
-			}
-		}
-	}
-	return run;
-}
-void Application::DestroyInstance( const VkInstance& instance )
-{
-	if( debug == true )
-		destroyFunction( instance, debugMessenger, nullptr );
-	vkDestroyInstance( instance, nullptr );
-}
-void Application::Destroy()
-{
-	const size_t AMOUNT_OF_INSTANCES_CONSTANT = instancesAndSurfaces.size();
-	for( unsigned int i = 0; i < AMOUNT_OF_INSTANCES_CONSTANT; ++i )
-	{
-		const size_t AMOUNT_OF_LOGICAL_DEVICES_CONSTANT = instancesAndSurfaces[ i ].logicalDevices.size();
-		for( unsigned int j = 0; j < AMOUNT_OF_LOGICAL_DEVICES_CONSTANT; ++j )
-		{
-			vkDestroySwapchainKHR( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice, 
-					instancesAndSurfaces[ i ].logicalDevices[ j ].swapChain.swapChain, nullptr );
-			vkDestroyDevice( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice, nullptr );
-		}
-		const size_t AMOUNT_OF_SURFACES_CONSTANT = instancesAndSurfaces[ i ].surfaces.size();
-		for( unsigned int j = 0; j < AMOUNT_OF_SURFACES_CONSTANT; ++j )
-		{
-			vkDestroySurfaceKHR( instancesAndSurfaces[ i ].instance,
-				instancesAndSurfaces[ i ].surfaces[ j ]->surface, nullptr );
-			glfwDestroyWindow( instancesAndSurfaces[ i ].surfaces[ j ]->window );
-		}
-		DestroyInstance( instancesAndSurfaces[ i ].instance );
-	}
-	glfwTerminate();
 }
 
 std::vector< VkSurfaceFormatKHR > Application::FindDesiredFormats( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
@@ -486,19 +438,19 @@ std::vector< VkPresentModeKHR > Application::FindDesiredPresentModes( const Logi
 }
 
 
-void Application::MakeExtent( const std::unique_ptr< Surface >& surface )
+void Application::MakeExtent( LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
 {
 	if( surface->capabilities.currentExtent.width != std::numeric_limits< uint32_t >::max() )
-		surface->extent = surface->capabilities.currentExtent;
+		logicalDevice.swapChain.extent = surface->capabilities.currentExtent;
 	else
 	{
 		int width, height;
 		glfwGetWindowSize( surface->window, &width, &height );
-		surface->extent = { ( uint32_t ) width, ( uint32_t ) height };
-		surface->extent.width = std::max( surface->capabilities.minImageExtent.width,
-			std::min( surface->capabilities.maxImageExtent.width, surface->extent.width ) );
-		surface->extent.height = std::max( surface->capabilities.minImageExtent.height,
-			std::min( surface->capabilities.maxImageExtent.height, surface->extent.height ) );
+		logicalDevice.swapChain.extent  = { ( uint32_t ) width, ( uint32_t ) height };
+		logicalDevice.swapChain.extent.width = std::max( surface->capabilities.minImageExtent.width,
+			std::min( surface->capabilities.maxImageExtent.width, logicalDevice.swapChain.extent.width ) );
+		logicalDevice.swapChain.extent.height = std::max( surface->capabilities.minImageExtent.height,
+			std::min( surface->capabilities.maxImageExtent.height, logicalDevice.swapChain.extent.height ) );
 	}
 }
 
@@ -514,7 +466,7 @@ SwapChain& Application::CreateSwapchain( const LogicalDevice& logicalDevice, con
 		if( !surface->formats.empty() && !surface->presentModes.empty() )
 		{
 			std::cout << "Note::CreateSwapchain( const LogicalDevice&, const std::unique_ptr< Surface >& ):SwapChain&: Swap chain format and presentation mode supported!\n";
-			MakeExtent( surface );
+			MakeExtent( ( LogicalDevice& ) logicalDevice, surface );
 			if( desiredFormats.size() != 0 )
 			{
 				uint32_t imageCount = surface->capabilities.minImageCount + 1;
@@ -528,7 +480,7 @@ SwapChain& Application::CreateSwapchain( const LogicalDevice& logicalDevice, con
 				swapChainCreateInfo.minImageCount = imageCount;
 				swapChainCreateInfo.imageFormat = logicalDevice.swapChain.format.format;
 				swapChainCreateInfo.imageColorSpace = logicalDevice.swapChain.format.colorSpace;
-				swapChainCreateInfo.imageExtent = surface->extent;
+				swapChainCreateInfo.imageExtent = logicalDevice.swapChain.extent;
 				swapChainCreateInfo.imageArrayLayers = 1;
 				swapChainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 				if( logicalDevice.graphicsFamily != logicalDevice.queue )
@@ -566,3 +518,68 @@ SwapChain& Application::CreateSwapchain( const LogicalDevice& logicalDevice, con
 		std::cerr << "Error::CreateSwapchain( const LogicalDevice&, const std::unique_ptr< Surface >& ):SwapChain&: This device does not have present support.\n";
 	return ( ( LogicalDevice& ) logicalDevice ).swapChain;
 }
+
+std::vector< VkImage >& GetSwapchainImages( const LogicalDevice& logicalDevice )
+{
+	size_t swapChainImageCount;
+	vkGetSwapchainImagesKHR( logicalDevice.logicalDevice, logicalDevice.swapChain.swapChain, &swapChainImageCount, nullptr );
+	( ( LogicalDevice& ) logicalDevice ).swapChain.images.resize( swapChainImageCount );
+	vkGetSwapchainImagesKHR( logicalDevice.logicalDevice, logicalDevice.swapChain.swapChain, 
+			&swapChainImageCount, ( ( LogicalDevice& ) logicalDevice ).swapChain.images.data() );
+	return ( ( LogicalDevice& ) logicalDevice ).swapChain.images;
+}
+
+bool Application::Update() {
+	return GLFWUpdate();
+}
+
+bool Application::GLFWUpdate()
+{
+	bool run = false;
+	for( const Instance& currentInstance : instancesAndSurfaces )
+	{
+		for( const std::unique_ptr< Surface >& currentSurface : currentInstance.surfaces )
+		{
+			if( currentSurface->window != nullptr )
+			{
+				if( glfwWindowShouldClose( currentSurface->window ) == false ) {
+					glfwPollEvents();
+					run = true;
+				}
+			}
+		}
+	}
+	return run;
+}
+
+void Application::DestroyInstance( const VkInstance& instance )
+{
+	if( debug == true )
+		destroyFunction( instance, debugMessenger, nullptr );
+	vkDestroyInstance( instance, nullptr );
+}
+
+void Application::Destroy()
+{
+	const size_t AMOUNT_OF_INSTANCES_CONSTANT = instancesAndSurfaces.size();
+	for( unsigned int i = 0; i < AMOUNT_OF_INSTANCES_CONSTANT; ++i )
+	{
+		const size_t AMOUNT_OF_LOGICAL_DEVICES_CONSTANT = instancesAndSurfaces[ i ].logicalDevices.size();
+		for( unsigned int j = 0; j < AMOUNT_OF_LOGICAL_DEVICES_CONSTANT; ++j )
+		{
+			vkDestroySwapchainKHR( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice,
+				instancesAndSurfaces[ i ].logicalDevices[ j ].swapChain.swapChain, nullptr );
+			vkDestroyDevice( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice, nullptr );
+		}
+		const size_t AMOUNT_OF_SURFACES_CONSTANT = instancesAndSurfaces[ i ].surfaces.size();
+		for( unsigned int j = 0; j < AMOUNT_OF_SURFACES_CONSTANT; ++j )
+		{
+			vkDestroySurfaceKHR( instancesAndSurfaces[ i ].instance,
+				instancesAndSurfaces[ i ].surfaces[ j ]->surface, nullptr );
+			glfwDestroyWindow( instancesAndSurfaces[ i ].surfaces[ j ]->window );
+		}
+		DestroyInstance( instancesAndSurfaces[ i ].instance );
+	}
+	glfwTerminate();
+}
+
