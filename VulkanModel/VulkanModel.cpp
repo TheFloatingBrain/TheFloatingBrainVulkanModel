@@ -50,7 +50,9 @@ struct SwapChain
 	VkSurfaceFormatKHR format;
 	VkPresentModeKHR presentMode;
 	VkExtent2D extent;
+	VkFormat imageFormat;
 	std::vector< VkImage > images;	
+	std::vector< VkImageView > imageViews;
 };
 
 struct LogicalDevice
@@ -61,6 +63,7 @@ struct LogicalDevice
 	VkBool32 presentSuccess;
 	VkQueue que = VK_NULL_HANDLE;
 	SwapChain swapChain;
+	VkExtent2D extent;
 };
 
 struct Instance
@@ -93,7 +96,8 @@ struct Application
 	std::vector< VkSurfaceFormatKHR > FindDesiredFormats( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
 	std::vector< VkPresentModeKHR > FindDesiredPresentModes( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
 	void MakeExtent( LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
-	std::vector< VkImage >& GetSwapchainImages( const LogicalDevice& logicalDevice );
+	std::vector< VkImage >& GetSwapchainImages( LogicalDevice& logicalDevice );
+	void MakeSwapChainImageViews( LogicalDevice& logicalDevice, SwapChain& swapChain );
 	bool Update();
 	bool GLFWUpdate();
 	void Destroy();
@@ -451,6 +455,45 @@ void Application::MakeExtent( LogicalDevice& logicalDevice, const std::unique_pt
 			std::min( surface->capabilities.maxImageExtent.width, logicalDevice.swapChain.extent.width ) );
 		logicalDevice.swapChain.extent.height = std::max( surface->capabilities.minImageExtent.height,
 			std::min( surface->capabilities.maxImageExtent.height, logicalDevice.swapChain.extent.height ) );
+		logicalDevice.extent = logicalDevice.swapChain.extent;
+	}
+}
+
+std::vector< VkImage >& Application::GetSwapchainImages( LogicalDevice& logicalDevice )
+{
+	size_t swapChainImageCount;
+	vkGetSwapchainImagesKHR( logicalDevice.logicalDevice, logicalDevice.swapChain.swapChain, &swapChainImageCount, nullptr );
+	( ( LogicalDevice& ) logicalDevice ).swapChain.images.resize( swapChainImageCount );
+	vkGetSwapchainImagesKHR( logicalDevice.logicalDevice, logicalDevice.swapChain.swapChain,
+		&swapChainImageCount, ( ( LogicalDevice& ) logicalDevice ).swapChain.images.data() );
+	logicalDevice.swapChain.imageFormat = logicalDevice.swapChain.format.format;
+	return ( ( LogicalDevice& ) logicalDevice ).swapChain.images;
+}
+
+void Application::MakeSwapChainImageViews( LogicalDevice& logicalDevice, SwapChain& swapChain )
+{
+	const size_t AMOUNT_OF_IMAGE_VIEWS_CONSTANT = swapChain.images.size();
+	swapChain.imageViews.resize( AMOUNT_OF_IMAGE_VIEWS_CONSTANT );
+	for( size_t i = 0; i < AMOUNT_OF_IMAGE_VIEWS_CONSTANT; ++i )
+	{
+		VkImageViewCreateInfo createInfo = {};
+		createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		createInfo.image = swapChain.images[ i ];
+		createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		createInfo.format = swapChain.imageFormat;
+		createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		createInfo.subresourceRange.baseMipLevel = 0;
+		createInfo.subresourceRange.levelCount = 1;
+		createInfo.subresourceRange.baseArrayLayer = 0;
+		createInfo.subresourceRange.layerCount = 1;
+		if( vkCreateImageView( logicalDevice.logicalDevice, &createInfo, nullptr, &swapChain.imageViews[ i ] ) == VK_SUCCESS )
+			std::cout << "Note::MakeSwapChainImageViews( LogicalDevice&, SwapChain& ):void: Successfully created image view " << i << ".\n";
+		else
+			std::cerr << "Error::MakeSwapChainImageViews( LogicalDevice&, SwapChain& ):void: Failed to create image view " << i << ".\n";
 	}
 }
 
@@ -504,7 +547,11 @@ SwapChain& Application::CreateSwapchain( const LogicalDevice& logicalDevice, con
 				//TODO: CHANGE LATER.//
 				swapChainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
 				if( vkCreateSwapchainKHR( logicalDevice.logicalDevice, &swapChainCreateInfo, nullptr, ( VkSwapchainKHR* ) &logicalDevice.swapChain.swapChain ) == VK_SUCCESS )
+				{
+					GetSwapchainImages( ( LogicalDevice& ) logicalDevice );
+					MakeSwapChainImageViews( ( LogicalDevice& ) logicalDevice, ( ( LogicalDevice& ) logicalDevice ).swapChain );
 					std::cout << "Note::CreateSwapchain( const LogicalDevice&, const std::unique_ptr< Surface >& ):SwapChain&: Successfully created swap chain!\n";
+				}
 				else
 					std::cerr << "Error::CreateSwapchain( const LogicalDevice&, const std::unique_ptr< Surface >& ):SwapChain&: Failed to create swap chain!\n";
 			}
@@ -517,16 +564,6 @@ SwapChain& Application::CreateSwapchain( const LogicalDevice& logicalDevice, con
 	else
 		std::cerr << "Error::CreateSwapchain( const LogicalDevice&, const std::unique_ptr< Surface >& ):SwapChain&: This device does not have present support.\n";
 	return ( ( LogicalDevice& ) logicalDevice ).swapChain;
-}
-
-std::vector< VkImage >& GetSwapchainImages( const LogicalDevice& logicalDevice )
-{
-	size_t swapChainImageCount;
-	vkGetSwapchainImagesKHR( logicalDevice.logicalDevice, logicalDevice.swapChain.swapChain, &swapChainImageCount, nullptr );
-	( ( LogicalDevice& ) logicalDevice ).swapChain.images.resize( swapChainImageCount );
-	vkGetSwapchainImagesKHR( logicalDevice.logicalDevice, logicalDevice.swapChain.swapChain, 
-			&swapChainImageCount, ( ( LogicalDevice& ) logicalDevice ).swapChain.images.data() );
-	return ( ( LogicalDevice& ) logicalDevice ).swapChain.images;
 }
 
 bool Application::Update() {
@@ -567,6 +604,8 @@ void Application::Destroy()
 		const size_t AMOUNT_OF_LOGICAL_DEVICES_CONSTANT = instancesAndSurfaces[ i ].logicalDevices.size();
 		for( unsigned int j = 0; j < AMOUNT_OF_LOGICAL_DEVICES_CONSTANT; ++j )
 		{
+			for( auto& imageView : instancesAndSurfaces[ i ].logicalDevices[ j ].swapChain.imageViews )
+				vkDestroyImageView( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice, imageView, nullptr );
 			vkDestroySwapchainKHR( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice,
 				instancesAndSurfaces[ i ].logicalDevices[ j ].swapChain.swapChain, nullptr );
 			vkDestroyDevice( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice, nullptr );
