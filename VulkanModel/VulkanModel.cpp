@@ -89,8 +89,8 @@ struct Application
 	void PrintAvailibleExtensions( const VkInstance& instance );
 	VkResult InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers, const VkInstance& instance );
 	SwapChain& CreateSwapchain( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
-	std::vector< VkSurfaceFormatKHR >&& FindDesiredFormats( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
-	std::vector< VkPresentModeKHR >&& FindDesiredPresentModes( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
+	std::vector< VkSurfaceFormatKHR > FindDesiredFormats( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
+	std::vector< VkPresentModeKHR > FindDesiredPresentModes( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
 	void MakeExtent( const std::unique_ptr< Surface >& surface );
 	bool Update();
 	bool GLFWUpdate();
@@ -426,7 +426,7 @@ void Application::Destroy()
 	glfwTerminate();
 }
 
-std::vector< VkSurfaceFormatKHR >&& Application::FindDesiredFormats( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
+std::vector< VkSurfaceFormatKHR > Application::FindDesiredFormats( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
 {
 	std::vector< VkSurfaceFormatKHR > desiredFormats;
 	uint32_t formatCount;
@@ -454,9 +454,9 @@ std::vector< VkSurfaceFormatKHR >&& Application::FindDesiredFormats( const Logic
 				desiredFormats.push_back( format );
 		}
 	}
-	return std::move( desiredFormats );
+	return desiredFormats;
 }
-std::vector< VkPresentModeKHR >&& Application::FindDesiredPresentModes( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
+std::vector< VkPresentModeKHR > Application::FindDesiredPresentModes( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
 {
 	std::vector< VkPresentModeKHR > desiredPresentModes;
 	uint32_t presentModeCount;
@@ -482,7 +482,7 @@ std::vector< VkPresentModeKHR >&& Application::FindDesiredPresentModes( const Lo
 	}
 	if( hasFIFO == true )
 		desiredPresentModes.push_back( VK_PRESENT_MODE_FIFO_KHR );
-	return std::move( desiredPresentModes );
+	return desiredPresentModes;
 }
 
 
@@ -506,17 +506,15 @@ SwapChain& Application::CreateSwapchain( const LogicalDevice& logicalDevice, con
 {
 	if( logicalDevice.presentSuccess == VK_TRUE )
 	{
-		std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: This device has present support.\n";
+		std::cout << "Note::CreateSwapchain( const LogicalDevice&, const std::unique_ptr< Surface >& ):SwapChain&: This device has present support.\n";
 		vkGetDeviceQueue( logicalDevice.logicalDevice, logicalDevice.queue, 0, ( VkQueue* ) &logicalDevice.que );
 		vkGetPhysicalDeviceSurfaceCapabilitiesKHR( logicalDevice.physicalDevice, surface->surface, &surface->capabilities );
+		std::vector< VkSurfaceFormatKHR > desiredFormats = FindDesiredFormats( logicalDevice, surface );
+		std::vector< VkPresentModeKHR > desiredPresentModes = FindDesiredPresentModes( logicalDevice, surface );
 		if( !surface->formats.empty() && !surface->presentModes.empty() )
 		{
-			std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain format and presentation mode supported!\n";
-			std::vector< VkSurfaceFormatKHR > desiredFormats = FindDesiredFormats( logicalDevice, surface );
-			std::vector< VkPresentModeKHR > desiredPresentModes = FindDesiredPresentModes( logicalDevice, surface );
+			std::cout << "Note::CreateSwapchain( const LogicalDevice&, const std::unique_ptr< Surface >& ):SwapChain&: Swap chain format and presentation mode supported!\n";
 			MakeExtent( surface );
-			/////////////////////////////////////////////////////////////////
-			/////////////////////////////////////////////////////////////////
 			if( desiredFormats.size() != 0 )
 			{
 				uint32_t imageCount = surface->capabilities.minImageCount + 1;
@@ -533,7 +531,6 @@ SwapChain& Application::CreateSwapchain( const LogicalDevice& logicalDevice, con
 				swapChainCreateInfo.imageExtent = surface->extent;
 				swapChainCreateInfo.imageArrayLayers = 1;
 				swapChainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-				//std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain info successfully created!!\n";
 				if( logicalDevice.graphicsFamily != logicalDevice.queue )
 				{
 					uint32_t queueIndicies[] = { logicalDevice.graphicsFamily, logicalDevice.queue };
@@ -555,18 +552,17 @@ SwapChain& Application::CreateSwapchain( const LogicalDevice& logicalDevice, con
 				//TODO: CHANGE LATER.//
 				swapChainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
 				if( vkCreateSwapchainKHR( logicalDevice.logicalDevice, &swapChainCreateInfo, nullptr, ( VkSwapchainKHR* ) &logicalDevice.swapChain.swapChain ) == VK_SUCCESS )
-					std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Successfully created swap chain!\n";
+					std::cout << "Note::CreateSwapchain( const LogicalDevice&, const std::unique_ptr< Surface >& ):SwapChain&: Successfully created swap chain!\n";
 				else
-					std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Failed to create swap chain!\n";
-				return ( ( LogicalDevice& ) logicalDevice ).swapChain;
+					std::cerr << "Error::CreateSwapchain( const LogicalDevice&, const std::unique_ptr< Surface >& ):SwapChain&: Failed to create swap chain!\n";
 			}
 			else
-				std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: No desired formats!\n";
+				std::cerr << "Error::CreateSwapchain( const LogicalDevice&, const std::unique_ptr< Surface >& ):SwapChain&: No desired formats!\n";
 		}
 		else
-			std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain format and presentation mode NOT supported!\n";
+			std::cerr << "Error::CreateSwapchain( const LogicalDevice&, const std::unique_ptr< Surface >& ):SwapChain&: Swap chain format and presentation mode NOT supported!\n";
 	}
 	else
-		std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: This device does not have present support.\n";
-
+		std::cerr << "Error::CreateSwapchain( const LogicalDevice&, const std::unique_ptr< Surface >& ):SwapChain&: This device does not have present support.\n";
+	return ( ( LogicalDevice& ) logicalDevice ).swapChain;
 }
