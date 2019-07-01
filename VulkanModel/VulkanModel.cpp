@@ -47,6 +47,7 @@ struct LogicalDevice
 	VkPhysicalDevice physicalDevice;
 	VkBool32 presentSuccess;
 	VkQueue que = VK_NULL_HANDLE;
+	VkSwapchainKHR swapChain;
 };
 
 struct Instance
@@ -260,6 +261,17 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 								swapChainCreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 								swapChainCreateInfo.queueFamilyIndexCount = 0;
 								swapChainCreateInfo.pQueueFamilyIndices = nullptr;
+							}
+							swapChainCreateInfo.preTransform = capabilities.currentTransform;
+							//TODO: CHANGE LATER.//
+							swapChainCreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+							swapChainCreateInfo.presentMode = presentModes[ 0 ];
+							swapChainCreateInfo.clipped = VK_TRUE;
+							//TODO: CHANGE LATER.//
+							swapChainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
+							if( vkCreateSwapchainKHR( logicalDevice.logicalDevice, &swapChainCreateInfo, nullptr, ( VkSwapchainKHR* ) &logicalDevice.swapChain ) )
+							{
+								std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Failed to create swap chain!\n";
 							}
 						}
 						else
@@ -496,7 +508,11 @@ void Application::Destroy()
 	{
 		const size_t AMOUNT_OF_LOGICAL_DEVICES_CONSTANT = instancesAndSurfaces[ i ].logicalDevices.size();
 		for( unsigned int j = 0; j < AMOUNT_OF_LOGICAL_DEVICES_CONSTANT; ++j )
+		{
+			vkDestroySwapchainKHR( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice, 
+					instancesAndSurfaces[ i ].logicalDevices[ j ].swapChain, nullptr );
 			vkDestroyDevice( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice, nullptr );
+		}
 		const size_t AMOUNT_OF_SURFACES_CONSTANT = instancesAndSurfaces[ i ].surfaces.size();
 		for( unsigned int j = 0; j < AMOUNT_OF_SURFACES_CONSTANT; ++j )
 		{
