@@ -165,7 +165,7 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 				std::vector< VkPresentModeKHR > presentModes;
 				std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Supports Vulkan!\n";
 				auto& logicalDevice = instance.logicalDevices[ instance.logicalDevices.size() - 1 ];
-				if( presentSupport == VK_TRUE )
+				if( logicalDevice.presentSuccess == VK_TRUE )
 				{
 					std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: This device has present support.\n";
 					vkGetDeviceQueue( logicalDevice.logicalDevice, logicalDevice.queue, 0, ( VkQueue* ) &logicalDevice.que );
@@ -185,9 +185,9 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 					if( !formats.empty() && !presentModes.empty() )
 					{
 						std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain format and presentation mode supported!\n";
-						std::vector< const VkSurfaceFormatKHR& > desiredFormats;
-						std::vector< const VkPresentModeKHR& > desiredPresentModes;
-						for( const auto& format : formats )
+						std::vector< VkSurfaceFormatKHR > desiredFormats;
+						std::vector< VkPresentModeKHR > desiredPresentModes;
+						for( auto& format : formats )
 						{
 							if( format.format == VK_FORMAT_B8G8R8A8_UNORM )
 							{
@@ -196,7 +196,11 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 									if( desiredFormats.size() == 0 )
 										desiredFormats.push_back( format );
 									else
-										desiredFormats.insert( desiredFormats.begin(), format );
+									{
+										VkSurfaceFormatKHR toSwap = desiredFormats[ 0 ];
+										desiredFormats.push_back( toSwap );
+										desiredFormats[ 0 ] = format;
+									}
 								}
 								else
 									desiredFormats.push_back( format );
@@ -227,7 +231,7 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 						{
 							int width, height;
 							glfwGetWindowSize( surface->window, &width, &height );
-							extent = { width, height };
+							extent = { ( uint32_t ) width, ( uint32_t ) height };
 							extent.width = std::max( capabilities.minImageExtent.width, 
 									std::min( capabilities.maxImageExtent.width, extent.width ) );
 							extent.height = std::max( capabilities.minImageExtent.height,
@@ -403,7 +407,7 @@ size_t Application::CreateLogicalDevice( const Instance& instance, const VkPhysi
 	{
 		if( queueFamilies[ i ].queueFlags & VK_QUEUE_GRAPHICS_BIT )
 			graphicsFamily = i;
-		vkGetPhysicalDeviceSurfaceSupportKHR( physicalDevice, queueFamilyIndex, surface->surface, &presentSupport );
+		vkGetPhysicalDeviceSurfaceSupportKHR( physicalDevice, i, surface->surface, &presentSupport );
 		if( presentSupport == VK_TRUE ) {
 			queueFamilyIndex = i;
 			presentSupport = VK_FALSE;
