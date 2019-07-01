@@ -252,7 +252,7 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 							swapChainCreateInfo.imageExtent = extent;
 							swapChainCreateInfo.imageArrayLayers = 1;
 							swapChainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-							std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain info successfully created!!\n";
+							//std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain info successfully created!!\n";
 							if( logicalDevice.graphicsFamily != logicalDevice.queue )
 							{
 								uint32_t queueIndicies[] = { logicalDevice.graphicsFamily, logicalDevice.queue };
@@ -273,10 +273,10 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 							swapChainCreateInfo.clipped = VK_TRUE;
 							//TODO: CHANGE LATER.//
 							swapChainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
-							if( vkCreateSwapchainKHR( logicalDevice.logicalDevice, &swapChainCreateInfo, nullptr, ( VkSwapchainKHR* ) &logicalDevice.swapChain ) )
-							{
+							if( vkCreateSwapchainKHR( logicalDevice.logicalDevice, &swapChainCreateInfo, nullptr, ( VkSwapchainKHR* ) &logicalDevice.swapChain ) == VK_SUCCESS )
+								std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Successfully created swap chain!\n";
+							else
 								std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Failed to create swap chain!\n";
-							}
 						}
 						else
 							std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: No desired formats!\n";
