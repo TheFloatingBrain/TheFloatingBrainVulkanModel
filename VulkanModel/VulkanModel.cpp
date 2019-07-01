@@ -35,9 +35,21 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallBack( VkDebugUtilsMessageSeverity
 }
 
 
-struct Surface {
+struct Surface
+{
 	VkSurfaceKHR surface;
 	GLFWwindow* window = nullptr;
+	VkSurfaceCapabilitiesKHR capabilities;
+	VkExtent2D extent;
+	std::vector< VkSurfaceFormatKHR > formats;
+	std::vector< VkPresentModeKHR > presentModes;
+};
+
+struct SwapChain
+{
+	VkSwapchainKHR swapChain;
+	VkSurfaceFormatKHR format;
+	VkPresentModeKHR presentMode;
 };
 
 struct LogicalDevice
@@ -47,7 +59,7 @@ struct LogicalDevice
 	VkPhysicalDevice physicalDevice;
 	VkBool32 presentSuccess;
 	VkQueue que = VK_NULL_HANDLE;
-	VkSwapchainKHR swapChain;
+	SwapChain swapChain;
 };
 
 struct Instance
@@ -76,6 +88,10 @@ struct Application
 	size_t CreateLogicalDevice( const Instance& instance, const VkPhysicalDevice& physicalDevice );
 	void PrintAvailibleExtensions( const VkInstance& instance );
 	VkResult InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers, const VkInstance& instance );
+	SwapChain& CreateSwapchain( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
+	std::vector< VkSurfaceFormatKHR >&& FindDesiredFormats( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
+	std::vector< VkPresentModeKHR >&& FindDesiredPresentModes( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
+	void MakeExtent( const std::unique_ptr< Surface >& surface );
 	bool Update();
 	bool GLFWUpdate();
 	void Destroy();
@@ -160,132 +176,9 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 			std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Surface creation successful!\n";
 			if( glfwVulkanSupported() )
 			{
-				VkSurfaceCapabilitiesKHR capabilities;
-				std::vector< VkSurfaceFormatKHR > formats;
-				std::vector< VkPresentModeKHR > presentModes;
 				std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Supports Vulkan!\n";
 				auto& logicalDevice = instance.logicalDevices[ instance.logicalDevices.size() - 1 ];
-				if( logicalDevice.presentSuccess == VK_TRUE )
-				{
-					std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: This device has present support.\n";
-					vkGetDeviceQueue( logicalDevice.logicalDevice, logicalDevice.queue, 0, ( VkQueue* ) &logicalDevice.que );
-					vkGetPhysicalDeviceSurfaceCapabilitiesKHR( logicalDevice.physicalDevice, surface->surface, &capabilities );
-					uint32_t formatCount;
-					vkGetPhysicalDeviceSurfaceFormatsKHR( logicalDevice.physicalDevice, surface->surface, &formatCount, nullptr );
-					if( formatCount != 0 ) {
-						formats.resize( formatCount );
-						vkGetPhysicalDeviceSurfaceFormatsKHR( logicalDevice.physicalDevice, surface->surface, &formatCount, formats.data() );
-					}
-					uint32_t presentModeCount;
-					vkGetPhysicalDeviceSurfacePresentModesKHR( logicalDevice.physicalDevice, surface->surface, &presentModeCount, nullptr );
-					if( presentModeCount != 0 ) {
-						presentModes.resize( presentModeCount );
-						vkGetPhysicalDeviceSurfacePresentModesKHR( logicalDevice.physicalDevice, surface->surface, &presentModeCount, presentModes.data() );
-					}
-					if( !formats.empty() && !presentModes.empty() )
-					{
-						std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain format and presentation mode supported!\n";
-						std::vector< VkSurfaceFormatKHR > desiredFormats;
-						std::vector< VkPresentModeKHR > desiredPresentModes;
-						for( auto& format : formats )
-						{
-							if( format.format == VK_FORMAT_B8G8R8A8_UNORM )
-							{
-								if( format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR )
-								{
-									if( desiredFormats.size() == 0 )
-										desiredFormats.push_back( format );
-									else
-									{
-										VkSurfaceFormatKHR toSwap = desiredFormats[ 0 ];
-										desiredFormats.push_back( toSwap );
-										desiredFormats[ 0 ] = format;
-									}
-								}
-								else
-									desiredFormats.push_back( format );
-							}
-						}
-						bool hasFIFO = false;
-						for( const auto& mode : presentModes )
-						{
-							if( mode == VK_PRESENT_MODE_MAILBOX_KHR )
-							{
-								if( desiredPresentModes.size() == 0 )
-									desiredPresentModes.push_back( mode );
-								else
-									desiredPresentModes.insert( desiredPresentModes.begin(), mode );
-							}
-							else if( mode == VK_PRESENT_MODE_IMMEDIATE_KHR )
-								desiredPresentModes.push_back( mode );
-							else if( mode == VK_PRESENT_MODE_FIFO_KHR )
-								hasFIFO = true;
-						}
-						if( hasFIFO == true )
-							desiredPresentModes.push_back( VK_PRESENT_MODE_FIFO_KHR );
-						/////////////////////////////////////////////////////////////////
-						VkExtent2D extent;
-						if( capabilities.currentExtent.width != std::numeric_limits< uint32_t >::max() )
-							extent = capabilities.currentExtent;
-						else
-						{
-							int width, height;
-							glfwGetWindowSize( surface->window, &width, &height );
-							extent = { ( uint32_t ) width, ( uint32_t ) height };
-							extent.width = std::max( capabilities.minImageExtent.width, 
-									std::min( capabilities.maxImageExtent.width, extent.width ) );
-							extent.height = std::max( capabilities.minImageExtent.height,
-								std::min( capabilities.maxImageExtent.height, extent.height ) );
-						}
-						/////////////////////////////////////////////////////////////////
-						if( desiredFormats.size() != 0 )
-						{
-							uint32_t imageCount = capabilities.minImageCount + 1;
-							if( capabilities.maxImageCount > 0 && imageCount < capabilities.maxImageCount )
-								imageCount = capabilities.maxImageCount;
-							VkSwapchainCreateInfoKHR swapChainCreateInfo = {};
-							swapChainCreateInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-							swapChainCreateInfo.surface = surface->surface;
-							swapChainCreateInfo.minImageCount = imageCount;
-							swapChainCreateInfo.imageFormat = desiredFormats[ 0 ].format;
-							swapChainCreateInfo.imageColorSpace = desiredFormats[ 0 ].colorSpace;
-							swapChainCreateInfo.imageExtent = extent;
-							swapChainCreateInfo.imageArrayLayers = 1;
-							swapChainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-							//std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain info successfully created!!\n";
-							if( logicalDevice.graphicsFamily != logicalDevice.queue )
-							{
-								uint32_t queueIndicies[] = { logicalDevice.graphicsFamily, logicalDevice.queue };
-								swapChainCreateInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-								swapChainCreateInfo.queueFamilyIndexCount = 2;
-								swapChainCreateInfo.pQueueFamilyIndices = queueIndicies;
-							}
-							else
-							{
-								swapChainCreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-								swapChainCreateInfo.queueFamilyIndexCount = 0;
-								swapChainCreateInfo.pQueueFamilyIndices = nullptr;
-							}
-							swapChainCreateInfo.preTransform = capabilities.currentTransform;
-							//TODO: CHANGE LATER.//
-							swapChainCreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-							swapChainCreateInfo.presentMode = presentModes[ 0 ];
-							swapChainCreateInfo.clipped = VK_TRUE;
-							//TODO: CHANGE LATER.//
-							swapChainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
-							if( vkCreateSwapchainKHR( logicalDevice.logicalDevice, &swapChainCreateInfo, nullptr, ( VkSwapchainKHR* ) &logicalDevice.swapChain ) == VK_SUCCESS )
-								std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Successfully created swap chain!\n";
-							else
-								std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Failed to create swap chain!\n";
-						}
-						else
-							std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: No desired formats!\n";
-					}
-					else
-						std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain format and presentation mode NOT supported!\n";
-				}
-				else
-					std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: This device does not have present support.\n";
+				SwapChain& swapChain = CreateSwapchain( logicalDevice, surface );
 			}
 			else
 				std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Does Not Support Vulkan!\n";
@@ -518,7 +411,7 @@ void Application::Destroy()
 		for( unsigned int j = 0; j < AMOUNT_OF_LOGICAL_DEVICES_CONSTANT; ++j )
 		{
 			vkDestroySwapchainKHR( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice, 
-					instancesAndSurfaces[ i ].logicalDevices[ j ].swapChain, nullptr );
+					instancesAndSurfaces[ i ].logicalDevices[ j ].swapChain.swapChain, nullptr );
 			vkDestroyDevice( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice, nullptr );
 		}
 		const size_t AMOUNT_OF_SURFACES_CONSTANT = instancesAndSurfaces[ i ].surfaces.size();
@@ -533,3 +426,147 @@ void Application::Destroy()
 	glfwTerminate();
 }
 
+std::vector< VkSurfaceFormatKHR >&& Application::FindDesiredFormats( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
+{
+	std::vector< VkSurfaceFormatKHR > desiredFormats;
+	uint32_t formatCount;
+	vkGetPhysicalDeviceSurfaceFormatsKHR( logicalDevice.physicalDevice, surface->surface, &formatCount, nullptr );
+	if( formatCount != 0 ) {
+		surface->formats.resize( formatCount );
+		vkGetPhysicalDeviceSurfaceFormatsKHR( logicalDevice.physicalDevice, surface->surface, &formatCount, surface->formats.data() );
+	}
+	for( auto& format : surface->formats )
+	{
+		if( format.format == VK_FORMAT_B8G8R8A8_UNORM )
+		{
+			if( format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR )
+			{
+				if( desiredFormats.size() == 0 )
+					desiredFormats.push_back( format );
+				else
+				{
+					VkSurfaceFormatKHR toSwap = desiredFormats[ 0 ];
+					desiredFormats.push_back( toSwap );
+					desiredFormats[ 0 ] = format;
+				}
+			}
+			else
+				desiredFormats.push_back( format );
+		}
+	}
+	return std::move( desiredFormats );
+}
+std::vector< VkPresentModeKHR >&& Application::FindDesiredPresentModes( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
+{
+	std::vector< VkPresentModeKHR > desiredPresentModes;
+	uint32_t presentModeCount;
+	vkGetPhysicalDeviceSurfacePresentModesKHR( logicalDevice.physicalDevice, surface->surface, &presentModeCount, nullptr );
+	if( presentModeCount != 0 ) {
+		surface->presentModes.resize( presentModeCount );
+		vkGetPhysicalDeviceSurfacePresentModesKHR( logicalDevice.physicalDevice, surface->surface, &presentModeCount, surface->presentModes.data() );
+	}
+	bool hasFIFO = false;
+	for( const auto& mode : surface->presentModes )
+	{
+		if( mode == VK_PRESENT_MODE_MAILBOX_KHR )
+		{
+			if( desiredPresentModes.size() == 0 )
+				desiredPresentModes.push_back( mode );
+			else
+				desiredPresentModes.insert( desiredPresentModes.begin(), mode );
+		}
+		else if( mode == VK_PRESENT_MODE_IMMEDIATE_KHR )
+			desiredPresentModes.push_back( mode );
+		else if( mode == VK_PRESENT_MODE_FIFO_KHR )
+			hasFIFO = true;
+	}
+	if( hasFIFO == true )
+		desiredPresentModes.push_back( VK_PRESENT_MODE_FIFO_KHR );
+	return std::move( desiredPresentModes );
+}
+
+
+void Application::MakeExtent( const std::unique_ptr< Surface >& surface )
+{
+	if( surface->capabilities.currentExtent.width != std::numeric_limits< uint32_t >::max() )
+		surface->extent = surface->capabilities.currentExtent;
+	else
+	{
+		int width, height;
+		glfwGetWindowSize( surface->window, &width, &height );
+		surface->extent = { ( uint32_t ) width, ( uint32_t ) height };
+		surface->extent.width = std::max( surface->capabilities.minImageExtent.width,
+			std::min( surface->capabilities.maxImageExtent.width, surface->extent.width ) );
+		surface->extent.height = std::max( surface->capabilities.minImageExtent.height,
+			std::min( surface->capabilities.maxImageExtent.height, surface->extent.height ) );
+	}
+}
+
+SwapChain& Application::CreateSwapchain( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
+{
+	if( logicalDevice.presentSuccess == VK_TRUE )
+	{
+		std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: This device has present support.\n";
+		vkGetDeviceQueue( logicalDevice.logicalDevice, logicalDevice.queue, 0, ( VkQueue* ) &logicalDevice.que );
+		vkGetPhysicalDeviceSurfaceCapabilitiesKHR( logicalDevice.physicalDevice, surface->surface, &surface->capabilities );
+		if( !surface->formats.empty() && !surface->presentModes.empty() )
+		{
+			std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain format and presentation mode supported!\n";
+			std::vector< VkSurfaceFormatKHR > desiredFormats = FindDesiredFormats( logicalDevice, surface );
+			std::vector< VkPresentModeKHR > desiredPresentModes = FindDesiredPresentModes( logicalDevice, surface );
+			MakeExtent( surface );
+			/////////////////////////////////////////////////////////////////
+			/////////////////////////////////////////////////////////////////
+			if( desiredFormats.size() != 0 )
+			{
+				uint32_t imageCount = surface->capabilities.minImageCount + 1;
+				if( surface->capabilities.maxImageCount > 0 && imageCount < surface->capabilities.maxImageCount )
+					imageCount = surface->capabilities.maxImageCount;
+				( ( LogicalDevice& ) logicalDevice ).swapChain.format = desiredFormats[ 0 ];
+				( ( LogicalDevice& ) logicalDevice ).swapChain.presentMode = desiredPresentModes[ 0 ];
+				VkSwapchainCreateInfoKHR swapChainCreateInfo = {};
+				swapChainCreateInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+				swapChainCreateInfo.surface = surface->surface;
+				swapChainCreateInfo.minImageCount = imageCount;
+				swapChainCreateInfo.imageFormat = logicalDevice.swapChain.format.format;
+				swapChainCreateInfo.imageColorSpace = logicalDevice.swapChain.format.colorSpace;
+				swapChainCreateInfo.imageExtent = surface->extent;
+				swapChainCreateInfo.imageArrayLayers = 1;
+				swapChainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+				//std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain info successfully created!!\n";
+				if( logicalDevice.graphicsFamily != logicalDevice.queue )
+				{
+					uint32_t queueIndicies[] = { logicalDevice.graphicsFamily, logicalDevice.queue };
+					swapChainCreateInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+					swapChainCreateInfo.queueFamilyIndexCount = 2;
+					swapChainCreateInfo.pQueueFamilyIndices = queueIndicies;
+				}
+				else
+				{
+					swapChainCreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+					swapChainCreateInfo.queueFamilyIndexCount = 0;
+					swapChainCreateInfo.pQueueFamilyIndices = nullptr;
+				}
+				swapChainCreateInfo.preTransform = surface->capabilities.currentTransform;
+				//TODO: CHANGE LATER.//
+				swapChainCreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+				swapChainCreateInfo.presentMode = logicalDevice.swapChain.presentMode;
+				swapChainCreateInfo.clipped = VK_TRUE;
+				//TODO: CHANGE LATER.//
+				swapChainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
+				if( vkCreateSwapchainKHR( logicalDevice.logicalDevice, &swapChainCreateInfo, nullptr, ( VkSwapchainKHR* ) &logicalDevice.swapChain.swapChain ) == VK_SUCCESS )
+					std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Successfully created swap chain!\n";
+				else
+					std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Failed to create swap chain!\n";
+				return ( ( LogicalDevice& ) logicalDevice ).swapChain;
+			}
+			else
+				std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: No desired formats!\n";
+		}
+		else
+			std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain format and presentation mode NOT supported!\n";
+	}
+	else
+		std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: This device does not have present support.\n";
+
+}
