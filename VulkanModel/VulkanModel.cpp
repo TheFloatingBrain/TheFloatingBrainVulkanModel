@@ -403,14 +403,18 @@ size_t Application::CreateLogicalDevice( const Instance& instance, const VkPhysi
 	std::unique_ptr< Surface >& surface = ( ( Instance& ) instance ).surfaces[ instance.surfaces.size() - 1 ];
 	std::cout << "Note::CreateLogicalDevice( const VkInstance&, const VkPhysicalDevice& ):void: Amount of queue families is " << AMOUNT_OF_QUEUE_FAMILIES_CONSTANT << ".\n";
 	VkBool32 presentSupport = VK_FALSE;
+	bool foundPresent = false;
 	for( unsigned int i = 0; i < AMOUNT_OF_QUEUE_FAMILIES_CONSTANT; ++i )
 	{
 		if( queueFamilies[ i ].queueFlags & VK_QUEUE_GRAPHICS_BIT )
 			graphicsFamily = i;
-		vkGetPhysicalDeviceSurfaceSupportKHR( physicalDevice, i, surface->surface, &presentSupport );
-		if( presentSupport == VK_TRUE ) {
-			queueFamilyIndex = i;
-			presentSupport = VK_FALSE;
+		if( foundPresent == false )
+		{
+			vkGetPhysicalDeviceSurfaceSupportKHR( physicalDevice, i, surface->surface, &presentSupport );
+			if( presentSupport == VK_TRUE ) {
+				queueFamilyIndex = i;
+				foundPresent = true;
+			}
 		}
 	}
 	if( queueFamilyIndex == -1 )
