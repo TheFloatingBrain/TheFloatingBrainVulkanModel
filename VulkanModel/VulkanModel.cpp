@@ -1,9 +1,16 @@
 #include <iostream>
 #include <vector>
+#include <set>
+#include <cstdlib>
+#include <cstdlib>
+#include <algorithm>
+#include <stdexcept>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+
+#include <stdio.h>
 
 const unsigned short NVDIA_VENDOR_ID_CONSTANT = 4318;
 
@@ -27,6 +34,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallBack( VkDebugUtilsMessageSeverity
 	return VK_FALSE;
 }
 
+
 struct Surface {
 	VkSurfaceKHR surface;
 	GLFWwindow* window = nullptr;
@@ -35,8 +43,10 @@ struct Surface {
 struct LogicalDevice
 {
 	VkDevice logicalDevice;
-	uint32_t queue;
+	uint32_t queue, graphicsFamily;
 	VkPhysicalDevice physicalDevice;
+	VkBool32 presentSuccess;
+	VkQueue que = VK_NULL_HANDLE;
 };
 
 struct Instance
@@ -55,7 +65,7 @@ struct WindowInformation {
 
 struct Application
 {
-	explicit Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate );
+ 	explicit Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate );
 	explicit Application( std::string title, unsigned int width, unsigned int height );
 	void Initialize( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate = nullptr, size_t amountOfWindowsToCreate = 0 );
 	GLFWwindow* InitializeGLFW( unsigned int width, unsigned int height, std::string title );
@@ -136,7 +146,6 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 		GrabPhysicalDevices( instance.instance );
 	VkPhysicalDevice physicalDevice = allPhysicalDevices[ allPhysicalDevices.size() - 1 ];
 	allPhysicalDevices.pop_back();
-	CreateLogicalDevice( instance, physicalDevice );
 	( ( Instance& ) instance ).physicalDevices.push_back( physicalDevice );
 	if( width != 0 || height != 0 )
 	{
@@ -144,17 +153,121 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 		const std::unique_ptr< Surface >& surface = instance.surfaces[ instance.surfaces.size() - 1 ];
 		surface->window = InitializeGLFW( width, height, name );
 		VkResult result = glfwCreateWindowSurface( instance.instance, surface->window, nullptr, &surface->surface );
+		CreateLogicalDevice( instance, physicalDevice );
 		if( result == VK_SUCCESS )
 		{
 			std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Surface creation successful!\n";
 			if( glfwVulkanSupported() )
 			{
+				VkSurfaceCapabilitiesKHR capabilities;
+				std::vector< VkSurfaceFormatKHR > formats;
+				std::vector< VkPresentModeKHR > presentModes;
 				std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Supports Vulkan!\n";
-				VkBool32 presentSupport = VK_FALSE;
 				auto& logicalDevice = instance.logicalDevices[ instance.logicalDevices.size() - 1 ];
-				vkGetPhysicalDeviceSurfaceSupportKHR( logicalDevice.physicalDevice, logicalDevice.queue, surface->surface, &presentSupport );
 				if( presentSupport == VK_TRUE )
+				{
 					std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: This device has present support.\n";
+					vkGetDeviceQueue( logicalDevice.logicalDevice, logicalDevice.queue, 0, ( VkQueue* ) &logicalDevice.que );
+					vkGetPhysicalDeviceSurfaceCapabilitiesKHR( logicalDevice.physicalDevice, surface->surface, &capabilities );
+					uint32_t formatCount;
+					vkGetPhysicalDeviceSurfaceFormatsKHR( logicalDevice.physicalDevice, surface->surface, &formatCount, nullptr );
+					if( formatCount != 0 ) {
+						formats.resize( formatCount );
+						vkGetPhysicalDeviceSurfaceFormatsKHR( logicalDevice.physicalDevice, surface->surface, &formatCount, formats.data() );
+					}
+					uint32_t presentModeCount;
+					vkGetPhysicalDeviceSurfacePresentModesKHR( logicalDevice.physicalDevice, surface->surface, &presentModeCount, nullptr );
+					if( presentModeCount != 0 ) {
+						presentModes.resize( presentModeCount );
+						vkGetPhysicalDeviceSurfacePresentModesKHR( logicalDevice.physicalDevice, surface->surface, &presentModeCount, presentModes.data() );
+					}
+					if( !formats.empty() && !presentModes.empty() )
+					{
+						std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain format and presentation mode supported!\n";
+						std::vector< const VkSurfaceFormatKHR& > desiredFormats;
+						std::vector< const VkPresentModeKHR& > desiredPresentModes;
+						for( const auto& format : formats )
+						{
+							if( format.format == VK_FORMAT_B8G8R8A8_UNORM )
+							{
+								if( format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR )
+								{
+									if( desiredFormats.size() == 0 )
+										desiredFormats.push_back( format );
+									else
+										desiredFormats.insert( desiredFormats.begin(), format );
+								}
+								else
+									desiredFormats.push_back( format );
+							}
+						}
+						bool hasFIFO = false;
+						for( const auto& mode : presentModes )
+						{
+							if( mode == VK_PRESENT_MODE_MAILBOX_KHR )
+							{
+								if( desiredPresentModes.size() == 0 )
+									desiredPresentModes.push_back( mode );
+								else
+									desiredPresentModes.insert( desiredPresentModes.begin(), mode );
+							}
+							else if( mode == VK_PRESENT_MODE_IMMEDIATE_KHR )
+								desiredPresentModes.push_back( mode );
+							else if( mode == VK_PRESENT_MODE_FIFO_KHR )
+								hasFIFO = true;
+						}
+						if( hasFIFO == true )
+							desiredPresentModes.push_back( VK_PRESENT_MODE_FIFO_KHR );
+						/////////////////////////////////////////////////////////////////
+						VkExtent2D extent;
+						if( capabilities.currentExtent.width != std::numeric_limits< uint32_t >::max() )
+							extent = capabilities.currentExtent;
+						else
+						{
+							int width, height;
+							glfwGetWindowSize( surface->window, &width, &height );
+							extent = { width, height };
+							extent.width = std::max( capabilities.minImageExtent.width, 
+									std::min( capabilities.maxImageExtent.width, extent.width ) );
+							extent.height = std::max( capabilities.minImageExtent.height,
+								std::min( capabilities.maxImageExtent.height, extent.height ) );
+						}
+						/////////////////////////////////////////////////////////////////
+						if( desiredFormats.size() != 0 )
+						{
+							uint32_t imageCount = capabilities.minImageCount + 1;
+							if( capabilities.maxImageCount > 0 && imageCount < capabilities.maxImageCount )
+								imageCount = capabilities.maxImageCount;
+							VkSwapchainCreateInfoKHR swapChainCreateInfo = {};
+							swapChainCreateInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+							swapChainCreateInfo.surface = surface->surface;
+							swapChainCreateInfo.minImageCount = imageCount;
+							swapChainCreateInfo.imageFormat = desiredFormats[ 0 ].format;
+							swapChainCreateInfo.imageColorSpace = desiredFormats[ 0 ].colorSpace;
+							swapChainCreateInfo.imageExtent = extent;
+							swapChainCreateInfo.imageArrayLayers = 1;
+							swapChainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+							std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain info successfully created!!\n";
+							if( logicalDevice.graphicsFamily != logicalDevice.queue )
+							{
+								uint32_t queueIndicies[] = { logicalDevice.graphicsFamily, logicalDevice.queue };
+								swapChainCreateInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+								swapChainCreateInfo.queueFamilyIndexCount = 2;
+								swapChainCreateInfo.pQueueFamilyIndices = queueIndicies;
+							}
+							else
+							{
+								swapChainCreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+								swapChainCreateInfo.queueFamilyIndexCount = 0;
+								swapChainCreateInfo.pQueueFamilyIndices = nullptr;
+							}
+						}
+						else
+							std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: No desired formats!\n";
+					}
+					else
+						std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Swap chain format and presentation mode NOT supported!\n";
+				}
 				else
 					std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: This device does not have present support.\n";
 			}
@@ -228,9 +341,25 @@ void Application::GrabPhysicalDevices( const VkInstance& toGrabFrom )
 		std::cout << "\t* : Device Name: " << deviceProperties.deviceName << "\n";
 		if( deviceProperties.vendorID == NVDIA_VENDOR_ID_CONSTANT ) {
 			std::cout << "\t\t--> This is an NVDIA device\n";
-			nvidia = i;
-		}
+			uint32_t extensionCount;
+			vkEnumerateDeviceExtensionProperties( allPhysicalDevices[ i ], nullptr, &extensionCount, nullptr );
 
+			std::vector<VkExtensionProperties> availableExtensions( extensionCount );
+			vkEnumerateDeviceExtensionProperties( allPhysicalDevices[ i ], nullptr, &extensionCount, availableExtensions.data() );
+
+			bool supportsSwapchain = false;
+			for( const auto& extension : availableExtensions )
+			{
+				if( strcmp( extension.extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME ) == 0 ) {
+					supportsSwapchain = true;
+					break;
+				}
+			}
+			if( supportsSwapchain == true ) {
+				std::cout << "\t\t--> This device supports swapchain.\n";
+				nvidia = i;
+			}
+		}
 	}
 	if( nvidia != ( -1 ) ) 
 	{
@@ -242,6 +371,7 @@ void Application::GrabPhysicalDevices( const VkInstance& toGrabFrom )
 size_t Application::CreateLogicalDevice( const Instance& instance, const VkPhysicalDevice& physicalDevice )
 {
 	uint32_t queueFamilyCount = 0;
+	uint32_t graphicsFamily = 0;
 	std::vector< VkQueueFamilyProperties > queueFamilies;
 	VkDeviceQueueCreateInfo queueCreateInfo = {};
 	VkPhysicalDeviceFeatures deviceFeatures = {};
@@ -254,12 +384,17 @@ size_t Application::CreateLogicalDevice( const Instance& instance, const VkPhysi
 	vkGetPhysicalDeviceQueueFamilyProperties( physicalDevice, &queueFamilyCount, queueFamilies.data() );
 	queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 	const size_t AMOUNT_OF_QUEUE_FAMILIES_CONSTANT = queueFamilies.size();
+	std::unique_ptr< Surface >& surface = ( ( Instance& ) instance ).surfaces[ instance.surfaces.size() - 1 ];
 	std::cout << "Note::CreateLogicalDevice( const VkInstance&, const VkPhysicalDevice& ):void: Amount of queue families is " << AMOUNT_OF_QUEUE_FAMILIES_CONSTANT << ".\n";
+	VkBool32 presentSupport = VK_FALSE;
 	for( unsigned int i = 0; i < AMOUNT_OF_QUEUE_FAMILIES_CONSTANT; ++i )
 	{
-		if(queueFamilies[ i ].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+		if( queueFamilies[ i ].queueFlags & VK_QUEUE_GRAPHICS_BIT )
+			graphicsFamily = i;
+		vkGetPhysicalDeviceSurfaceSupportKHR( physicalDevice, queueFamilyIndex, surface->surface, &presentSupport );
+		if( presentSupport == VK_TRUE ) {
 			queueFamilyIndex = i;
-			break;
+			presentSupport = VK_FALSE;
 		}
 	}
 	if( queueFamilyIndex == -1 )
@@ -270,11 +405,14 @@ size_t Application::CreateLogicalDevice( const Instance& instance, const VkPhysi
 	logicalDeviceCreationInfo.pQueueCreateInfos = &queueCreateInfo;
 	logicalDeviceCreationInfo.queueCreateInfoCount = 1;
 	logicalDeviceCreationInfo.pEnabledFeatures = &deviceFeatures;
+	logicalDeviceCreationInfo.enabledExtensionCount = 1;
+	std::vector< const char* > enabledExtensions{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+	logicalDeviceCreationInfo.ppEnabledExtensionNames = enabledExtensions.data();
 	if( vkCreateDevice( physicalDevice, &logicalDeviceCreationInfo, nullptr, &logicalDevice ) != VK_SUCCESS ) {
 		std::cerr << "Error::CreateLogicalDevice( const VkInstance&, const VkPhysicalDevice& ):void: Failed to create logic device.\n";
 		logicalDevice = VK_NULL_HANDLE;
 	}
-	( ( Instance& ) instance ).logicalDevices.push_back( LogicalDevice{ logicalDevice, queueFamilyIndex, physicalDevice } );
+	( ( Instance& ) instance ).logicalDevices.push_back( LogicalDevice{ logicalDevice, queueFamilyIndex, graphicsFamily, physicalDevice, presentSupport } );
 	return ( instance.logicalDevices.size() - 1 );
 }
 VkResult Application::InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers, const VkInstance& instance )
@@ -370,3 +508,4 @@ void Application::Destroy()
 	}
 	glfwTerminate();
 }
+
