@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <fstream>
 #include <set>
 #include <cstdlib>
 #include <cstdlib>
@@ -26,6 +27,31 @@ const unsigned short NVDIA_VENDOR_ID_CONSTANT = 4318;
 	#define PLATFORM_SURFACE_EXTENSION_NAME_MACRO "VK_KHR_win32_surface"
 #endif
 //To be continued...//
+
+enum ShaderType
+{
+	VERTEX_SHADER_TYPE_ENUMURATION = 0, 
+	TESSELLATION_SHADER_TYPE_ENUMURATION = 1,
+	GEOMETRY_SHADER_TYPE_ENUMURATION = 2,
+	FRAGMENT_SHADER_TYPE_ENUMURATION = 3,
+	OTHER_SHADER_TYPE_ENUMURATION = 4
+};
+
+const char const* SHADER_TYPE_STRINGS_CONSTANT[ 5 ] = { "vertex", "tessellation", "geometry", "fragment", "other" };
+const char const* SHADER_TYPE_SHORT_STRINGS_CONSTANT[ 5 ] = { "vert", "tess", "geom", "frag", "other" };
+
+using SPIRV_SOURCE_TYPE = std::vector< char >;
+
+struct ShaderSourceData
+{
+	char* name;
+	ShaderType shaderType;
+	SPIRV_SOURCE_TYPE shaderSource;
+};
+
+using SHADER_SOURCES_TYPE = std::vector< ShaderSourceData >;
+
+SPIRV_SOURCE_TYPE ReadSPIRVFile( std::string fileName );
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallBack( VkDebugUtilsMessageSeverityFlagBitsEXT messageSverity,
 		VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* callBackData,
@@ -64,6 +90,7 @@ struct LogicalDevice
 	VkQueue que = VK_NULL_HANDLE;
 	SwapChain swapChain;
 	VkExtent2D extent;
+	std::vector< VkShaderModule > shaderModules;
 };
 
 struct Instance
@@ -82,11 +109,11 @@ struct WindowInformation {
 
 struct Application
 {
- 	explicit Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate );
-	explicit Application( std::string title, unsigned int width, unsigned int height );
-	void Initialize( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate = nullptr, size_t amountOfWindowsToCreate = 0 );
+ 	explicit Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate, std::vector< SHADER_SOURCES_TYPE > shaders );
+	explicit Application( std::string title, unsigned int width, unsigned int height, SHADER_SOURCES_TYPE shaders );
+	void Initialize( size_t amountOfInstancesToCreate, std::vector< SHADER_SOURCES_TYPE > shaders, WindowInformation* windowsToCreate = nullptr, size_t amountOfWindowsToCreate = 0 );
 	GLFWwindow* InitializeGLFW( unsigned int width, unsigned int height, std::string title );
-	void InitializeVulkan( std::string name, const Instance& instance, unsigned int width_ = 0, unsigned int height_ = 0 );
+	void InitializeVulkan( std::string name, const Instance& instance, SHADER_SOURCES_TYPE shaders, unsigned int width_ = 0, unsigned int height_ = 0 );
 	void CreateInstance( std::string name, const VkInstance& instance );
 	void GrabPhysicalDevices( const VkInstance& toGrabFrom );
 	size_t CreateLogicalDevice( const Instance& instance, const VkPhysicalDevice& physicalDevice );
@@ -98,6 +125,7 @@ struct Application
 	void MakeExtent( LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
 	std::vector< VkImage >& GetSwapchainImages( LogicalDevice& logicalDevice );
 	void MakeSwapChainImageViews( LogicalDevice& logicalDevice, SwapChain& swapChain );
+	void CreateShaderModule( LogicalDevice& logicalDevice, const SPIRV_SOURCE_TYPE& source );
 	bool Update();
 	bool GLFWUpdate();
 	void Destroy();
@@ -118,34 +146,55 @@ struct Application
 
 int main()
 {
-	Application application{ "Vulkan Example", 800, 600 };
+	ShaderSourceData vert{ ( char* ) "HelloPrismVertexShader", VERTEX_SHADER_TYPE_ENUMURATION, ReadSPIRVFile( "Shaders/SPIRV/vert.spv" ) };
+	ShaderSourceData frag{ ( char* ) "HelloPrismFragmentShader", FRAGMENT_SHADER_TYPE_ENUMURATION, ReadSPIRVFile( "Shaders/SPIRV/frag.spv" ) };
+	Application application{ "Vulkan Example", 800, 600, SHADER_SOURCES_TYPE{ vert, frag } };
 	while( application.Update() );
 	application.Destroy();
 	return 0;
 }
+
 const std::string DEFAULT_WINDOW_TITLE_CONSTANT = "Vulkan Surface Window";
 
-Application::Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate ) {
-	Initialize( amountOfInstancesToCreate, windowsToCreate, amountOfWindowsToCreate );
+SPIRV_SOURCE_TYPE ReadSPIRVFile( std::string fileName )
+{
+	std::ifstream file{ fileName, std::ios::ate | std::ios::binary };
+	SPIRV_SOURCE_TYPE source;
+	if( file.is_open() )
+	{
+		const size_t FILE_SIZE_CONSTANT = ( size_t ) file.tellg();
+		source.resize( FILE_SIZE_CONSTANT );
+		file.seekg( 0 );
+		file.read( source.data(), FILE_SIZE_CONSTANT );
+	}
+	else
+		std::cerr << "Error::ReadSPIRVFile( std::string ): SPIRV_SOURCE_TYPE: Failed to open file.\n";
+	file.close();
+	return source;
 }
-Application::Application( std::string title, unsigned int width, unsigned int height ) {
+
+
+Application::Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate, std::vector< SHADER_SOURCES_TYPE > shaders ) {
+	Initialize( amountOfInstancesToCreate, shaders, windowsToCreate, amountOfWindowsToCreate );
+}
+Application::Application( std::string title, unsigned int width, unsigned int height, SHADER_SOURCES_TYPE shaders ) {
 	WindowInformation windowInformation{ title, width, height };
-	Initialize( 1, &windowInformation, 1 );
+	Initialize( 1, std::vector< SHADER_SOURCES_TYPE >{ shaders }, &windowInformation, 1 );
 }
-void Application::Initialize( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate )
+void Application::Initialize( size_t amountOfInstancesToCreate, std::vector< SHADER_SOURCES_TYPE > shaders, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate )
 {
 	instancesAndSurfaces.resize( amountOfInstancesToCreate );
 	for( unsigned int i = 0; i < amountOfInstancesToCreate; ++i )
 	{
 		if( i < amountOfWindowsToCreate ) {
 			InitializeVulkan( windowsToCreate[ i ].title,
-				instancesAndSurfaces[ i ], windowsToCreate[ i ].width, windowsToCreate[ i ].height );
+				instancesAndSurfaces[ i ], shaders[ i ], windowsToCreate[ i ].width, windowsToCreate[ i ].height );
 		}
 		else
-			InitializeVulkan( DEFAULT_WINDOW_TITLE_CONSTANT, instancesAndSurfaces[ i ] );
+			InitializeVulkan( DEFAULT_WINDOW_TITLE_CONSTANT, instancesAndSurfaces[ i ], shaders[ 0 ] );
 	}
 }
-GLFWwindow* Application::InitializeGLFW(unsigned int width, unsigned int height, std::string title )
+GLFWwindow* Application::InitializeGLFW( unsigned int width, unsigned int height, std::string title )
 {
 	glfwInit();
 	glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
@@ -162,7 +211,7 @@ void Application::PrintAvailibleExtensions( const VkInstance& instance )
 	for(const auto& currentExtension : extensions)
 		std::cout << "\t" << currentExtension.extensionName << "\n";
 }
-void Application::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height )
+void Application::InitializeVulkan( std::string name, const Instance& instance, SHADER_SOURCES_TYPE shaders, unsigned int width, unsigned int height )
 {
 	CreateInstance( name, instance.instance );
 	if( allPhysicalDevices.size() == 0 )
@@ -185,6 +234,8 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 				std::cout << "Note::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Supports Vulkan!\n";
 				auto& logicalDevice = instance.logicalDevices[ instance.logicalDevices.size() - 1 ];
 				SwapChain& swapChain = CreateSwapchain( logicalDevice, surface );
+				for( auto& currentShaderData : shaders )
+					CreateShaderModule( ( LogicalDevice& ) logicalDevice, currentShaderData.shaderSource );
 			}
 			else
 				std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Does Not Support Vulkan!\n";
@@ -566,6 +617,21 @@ SwapChain& Application::CreateSwapchain( const LogicalDevice& logicalDevice, con
 	return ( ( LogicalDevice& ) logicalDevice ).swapChain;
 }
 
+void Application::CreateShaderModule( LogicalDevice& logicalDevice, const SPIRV_SOURCE_TYPE& source )
+{
+	VkShaderModuleCreateInfo shaderModuleCreationInformation;
+	shaderModuleCreationInformation.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	shaderModuleCreationInformation.codeSize = source.size();
+	shaderModuleCreationInformation.pCode = reinterpret_cast< const uint32_t* >( source.data() );
+	VkShaderModule shaderModule;
+	if( vkCreateShaderModule( logicalDevice.logicalDevice, &shaderModuleCreationInformation, nullptr, &shaderModule ) == VK_SUCCESS ) {
+		logicalDevice.shaderModules.push_back( shaderModule );
+		std::cout << "Note::Application::CreateShaderModule( LogicalDevice&, const SPIRV_SOURCE_TYPE& ): void: Successfully created shader module!\n";
+	}
+	else
+		std::cerr << "Error::Application::CreateShaderModule( LogicalDevice&, const SPIRV_SOURCE_TYPE& ): void: Failed to create shader module!\n";
+}
+
 bool Application::Update() {
 	return GLFWUpdate();
 }
@@ -621,4 +687,3 @@ void Application::Destroy()
 	}
 	glfwTerminate();
 }
-
