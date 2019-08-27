@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <algorithm>
 #include <stdexcept>
+#include <string>
+#include <regex>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -28,30 +30,116 @@ const unsigned short NVDIA_VENDOR_ID_CONSTANT = 4318;
 #endif
 //To be continued...//
 
+const size_t AMOUNT_OF_SHADER_TYPES_CONSTANT = 7;
+
 enum ShaderType
 {
-	VERTEX_SHADER_TYPE_ENUMURATION = 0, 
-	TESSELLATION_SHADER_TYPE_ENUMURATION = 1,
-	GEOMETRY_SHADER_TYPE_ENUMURATION = 2,
-	FRAGMENT_SHADER_TYPE_ENUMURATION = 3,
-	OTHER_SHADER_TYPE_ENUMURATION = 4
+	VERTEX_SHADER_TYPE_ENUMURATION = 0,
+	FRAGMENT_SHADER_TYPE_ENUMURATION = 1,
+	TESSELLATION_CONTROL_SHADER_TYPE_ENUMURATION = 2,
+	TESSELLATION_EVALUATION_SHADER_TYPE_ENUMURATION = 3,
+	GEOMETRY_SHADER_TYPE_ENUMURATION = 4,
+	COMPUTE_SHADER_TYPE_ENUMURATION = 5, 
+	OTHER_SHADER_TYPE_ENUMURATION = 6,
+	NONE_SHADER_TYPE_ENUMERATION = ( -1 )
 };
 
-const char const* SHADER_TYPE_STRINGS_CONSTANT[ 5 ] = { "vertex", "tessellation", "geometry", "fragment", "other" };
-const char const* SHADER_TYPE_SHORT_STRINGS_CONSTANT[ 5 ] = { "vert", "tess", "geom", "frag", "other" };
+const std::string ShaderTypeToString( const ShaderType& shaderType );
+
+enum class ReadShaderMethod : unsigned short int
+{
+	NON_EXTENSION = 0, 
+	EXTENSION = 1, 
+	ENUMERATED = 2
+};
+
+std::string StripFilePath( std::string file );
+
+ShaderType ReadSPIRVShaderTypeFromFileName( std::string fileName, ReadShaderMethod howToRead, bool fullNames = true );
+
+template< ReadShaderMethod HOW_TO_READ_CONSTANT >
+struct ReadShaderType
+{
+	const ShaderType type;
+	ReadShaderType( ShaderType type_ ) :
+		type( type_ ) {
+	}
+	constexpr operator ShaderType() {
+		return type;
+	}
+};
+
+template<>
+struct ReadShaderType< ReadShaderMethod::NON_EXTENSION >
+{
+	const ShaderType type;
+	ReadShaderType( std::string fileName, bool fullNames = true ) : 
+			type( ReadSPIRVShaderTypeFromFileName( fileName,
+					ReadShaderMethod::NON_EXTENSION, fullNames ) ) {
+	}
+	constexpr operator ShaderType() {
+		return type;
+	}
+};
+
+template<>
+struct ReadShaderType< ReadShaderMethod::EXTENSION >
+{
+	const ShaderType type;
+	ReadShaderType( std::string fileName, bool fullNames = true ) :
+		type( ReadSPIRVShaderTypeFromFileName( fileName,
+			ReadShaderMethod::EXTENSION, fullNames ) ) {
+	}
+	constexpr operator ShaderType() {
+		return type;
+	}
+};
+
+const char* SHADER_TYPE_STRINGS_CONSTANT[ AMOUNT_OF_SHADER_TYPES_CONSTANT ] = { 
+		"vertex", 
+		"fragment", 
+		"tesseleation control", 
+		"tesselation evaluation", 
+		"geometry", 
+		"compute", 
+		"other"
+};
+
+const char* SHADER_TYPE_SHORT_STRINGS_CONSTANT[ AMOUNT_OF_SHADER_TYPES_CONSTANT ] = { 
+		"vert", 
+		"frag", 
+		"tesc", 
+		"tese", 
+		"geom", 
+		"comp", 
+		"other"
+};
 
 using SPIRV_SOURCE_TYPE = std::vector< char >;
 
 struct ShaderSourceData
 {
 	char* name;
+	char* sourcePath;
 	ShaderType shaderType;
 	SPIRV_SOURCE_TYPE shaderSource;
 };
 
+struct ShaderModule
+{
+	char* name;
+	ShaderType shaderType;
+	VkShaderModule shaderModule;
+};
+
+enum Status {
+	SUCCESS_ENUMURATION = 0, 
+	FAILURE_ENUMURATION = 1
+};
+
 using SHADER_SOURCES_TYPE = std::vector< ShaderSourceData >;
 
-SPIRV_SOURCE_TYPE ReadSPIRVFile( std::string fileName );
+SPIRV_SOURCE_TYPE ReadSPIRVFile( std::string filePath );
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallBack( VkDebugUtilsMessageSeverityFlagBitsEXT messageSverity,
 		VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* callBackData,
@@ -90,7 +178,7 @@ struct LogicalDevice
 	VkQueue que = VK_NULL_HANDLE;
 	SwapChain swapChain;
 	VkExtent2D extent;
-	std::vector< VkShaderModule > shaderModules;
+	std::vector< ShaderModule > shaderModules;
 };
 
 struct Instance
@@ -125,16 +213,14 @@ struct Application
 	void MakeExtent( LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
 	std::vector< VkImage >& GetSwapchainImages( LogicalDevice& logicalDevice );
 	void MakeSwapChainImageViews( LogicalDevice& logicalDevice, SwapChain& swapChain );
-	void CreateShaderModule( LogicalDevice& logicalDevice, const SPIRV_SOURCE_TYPE& source );
+	Status CreateShaderModule( LogicalDevice& logicalDevice, const SPIRV_SOURCE_TYPE& source );
 	bool Update();
 	bool GLFWUpdate();
 	void Destroy();
 	void DestroyInstance( const VkInstance& instance );
 	protected:
-		std::vector< Instance > instancesAndSurfaces;
+		std::vector< Instance > instances;
 		VkApplicationInfo applicationInfo = {};
-		VkInstanceCreateInfo createInfo = {};
-		VkDebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo = {};
 		const char** glfwExtensions;
 		uint32_t glfwExtensionCount = 0;
 		VkDebugUtilsMessengerEXT debugMessenger;
@@ -144,10 +230,13 @@ struct Application
 		float queuePriority = 1.0f;
 };
 
-int main()
+int main( int argc, char** args )
 {
-	ShaderSourceData vert{ ( char* ) "HelloPrismVertexShader", VERTEX_SHADER_TYPE_ENUMURATION, ReadSPIRVFile( "Shaders/SPIRV/vert.spv" ) };
-	ShaderSourceData frag{ ( char* ) "HelloPrismFragmentShader", FRAGMENT_SHADER_TYPE_ENUMURATION, ReadSPIRVFile( "Shaders/SPIRV/frag.spv" ) };
+	std::cout << "Shader type: " << ShaderTypeToString( ReadShaderType< ReadShaderMethod::NON_EXTENSION >( "Shaders/SPIRV/vert.spv" ) ) << "\n";
+	ShaderSourceData vert{ ( char* ) "HelloPrismVertexShader", ( char* ) "Shaders/SPIRV/vert.spv", 
+			VERTEX_SHADER_TYPE_ENUMURATION, ReadSPIRVFile( "Shaders/SPIRV/vert.spv" ) };
+	ShaderSourceData frag{ ( char* ) "HelloPrismFragmentShader", ( char* ) "Shaders/SPIRV/frag.spv", 
+			FRAGMENT_SHADER_TYPE_ENUMURATION, ReadSPIRVFile( "Shaders/SPIRV/frag.spv" ) };
 	Application application{ "Vulkan Example", 800, 600, SHADER_SOURCES_TYPE{ vert, frag } };
 	while( application.Update() );
 	application.Destroy();
@@ -156,9 +245,126 @@ int main()
 
 const std::string DEFAULT_WINDOW_TITLE_CONSTANT = "Vulkan Surface Window";
 
-SPIRV_SOURCE_TYPE ReadSPIRVFile( std::string fileName )
+const std::string ShaderTypeToString( const ShaderType& shaderType )
 {
-	std::ifstream file{ fileName, std::ios::ate | std::ios::binary };
+	switch( shaderType )
+	{
+		case VERTEX_SHADER_TYPE_ENUMURATION:
+			return "VERTEX_SHADER_TYPE_ENUMURATION";
+		case FRAGMENT_SHADER_TYPE_ENUMURATION:
+			return "FRAGMENT_SHADER_TYPE_ENUMURATION";
+		case TESSELLATION_CONTROL_SHADER_TYPE_ENUMURATION:
+			return "TESSELLATION_CONTROL_SHADER_TYPE_ENUMURATION";
+		case TESSELLATION_EVALUATION_SHADER_TYPE_ENUMURATION:
+			return "TESSELLATION_EVALUATION_SHADER_TYPE_ENUMURATION";
+		case GEOMETRY_SHADER_TYPE_ENUMURATION:
+			return "GEOMETRY_SHADER_TYPE_ENUMURATION";
+		case COMPUTE_SHADER_TYPE_ENUMURATION:
+			return "COMPUTE_SHADER_TYPE_ENUMURATION";
+		case OTHER_SHADER_TYPE_ENUMURATION:
+			return "OTHER_SHADER_TYPE_ENUMURATION";
+		case NONE_SHADER_TYPE_ENUMERATION:
+			return "NONE_SHADER_TYPE_ENUMERATION";
+		default:
+			return "VALUE_UNKNOWN";
+	}
+}
+
+std::string StripFilePath( std::string file )
+{
+	std::string result = file;
+	const auto LAST_BACK_SLASH_CONSTANT = file.rfind( "\\" );
+	const auto LAST_FORWARD_SLASH_CONSTANT = file.rfind( "/" );
+	if( LAST_BACK_SLASH_CONSTANT == std::string::npos && 
+			LAST_FORWARD_SLASH_CONSTANT != std::string::npos && 
+			( LAST_FORWARD_SLASH_CONSTANT + 1 ) < file.size() )
+				result = file.substr( LAST_FORWARD_SLASH_CONSTANT + 1 );
+	else if( LAST_FORWARD_SLASH_CONSTANT == std::string::npos && 
+			( LAST_BACK_SLASH_CONSTANT + 1 ) < file.size() )
+			result = file.substr( LAST_BACK_SLASH_CONSTANT + 1 );
+	else
+	{
+		const size_t LARGER_INDEX_CONSTANT = 
+				LAST_BACK_SLASH_CONSTANT > LAST_FORWARD_SLASH_CONSTANT ? 
+			LAST_BACK_SLASH_CONSTANT : LAST_FORWARD_SLASH_CONSTANT;
+		if( ( LARGER_INDEX_CONSTANT + 1 ) < file.size() ) {
+			result = file.substr( LARGER_INDEX_CONSTANT + 1 );
+		}
+	}
+	return result;
+}
+
+ShaderType ReadSPIRVShaderTypeFromFileName( std::string fileName, ReadShaderMethod howToRead, bool fullNames )
+{
+	constexpr const char MARKER_CONSTANT = '%';
+	ShaderType result = NONE_SHADER_TYPE_ENUMERATION;
+	std::string copy, nameRegex;
+	fileName = StripFilePath( fileName );
+	if( howToRead == ReadShaderMethod::NON_EXTENSION )
+	{
+		//(((([^\w\d\s])(%)([^\w\d\s]))|(([^\w\d\s])(%)$)|(^%$)|((^%)([^\w\d\s]))))
+		//OLD: (((([^\w\d\s])(%)([^\w\d\s]))|(([^\w\d\s])(%)$)|(^%$)))
+		nameRegex = std::string{ std::string{ "(((([^\\w\\d\\s])(" } +
+				MARKER_CONSTANT + std::string{ ")([^\\w\\d\\s]))|(([^\\w\\d\\s])(" } +
+				MARKER_CONSTANT + std::string{ ")$)|(^" } + 
+				MARKER_CONSTANT + std::string{ "$)|((^" } + 
+				MARKER_CONSTANT + std::string{ ")([^\\w\\d\\s]))))" }
+				};
+	}
+	else if( howToRead == ReadShaderMethod::EXTENSION )
+	{
+		//(([.])(%)([.]))|(([.])(%)$)
+		nameRegex = std::string{ std::string{ "(([.])(" } +
+				MARKER_CONSTANT + std::string{ ")([.]))|(([.])(" } +
+				MARKER_CONSTANT + std::string{ ")$)" }
+				};
+	}
+	const size_t NAME_REGEX_SIZE_CONSTANT = nameRegex.size();
+	std::vector< size_t > markerPositions;
+	const char** shaderTypeStringSets[ 2 ] = {
+		SHADER_TYPE_SHORT_STRINGS_CONSTANT,
+		SHADER_TYPE_STRINGS_CONSTANT
+	};
+	for( size_t i = 0; i < NAME_REGEX_SIZE_CONSTANT; ++i )
+	{
+		const size_t POSITION_CONSTANT = nameRegex.find( MARKER_CONSTANT, i );
+		if( POSITION_CONSTANT != std::string::npos )
+		{
+			markerPositions.push_back( POSITION_CONSTANT );
+			//One will be added to i.//
+			i = POSITION_CONSTANT;
+			continue;
+		}
+		else
+			break;
+	}
+	const size_t AMOUNT_OF_MARKER_POSITIONS_CONSTANT = markerPositions.size();
+	for( unsigned short int currentSet = 0; currentSet < 2; ++currentSet )
+	{
+		for( size_t i = 0; i < AMOUNT_OF_SHADER_TYPES_CONSTANT; ++i )
+		{
+			const size_t NAME_SIZE_CONSTANT = strlen( shaderTypeStringSets[ currentSet ][ i ] );
+			copy = nameRegex;
+			for( size_t j = 0; j < AMOUNT_OF_MARKER_POSITIONS_CONSTANT; ++j )
+			{
+				copy.erase( copy.begin() + markerPositions[ j ] + ( j * NAME_SIZE_CONSTANT ) - j );
+				copy.insert( markerPositions[ j ] + ( j * NAME_SIZE_CONSTANT ) - j,
+					shaderTypeStringSets[ currentSet ][ i ] );
+			}
+			if( std::regex_search( fileName, std::regex{ copy, std::regex_constants::icase } ) == true )
+			{
+				result = ( ShaderType ) i;
+				currentSet = 2;
+				break;
+			}
+		}
+	}
+	return result;
+}
+
+SPIRV_SOURCE_TYPE ReadSPIRVFile( std::string filePath )
+{
+	std::ifstream file{ filePath, std::ios::ate | std::ios::binary };
 	SPIRV_SOURCE_TYPE source;
 	if( file.is_open() )
 	{
@@ -166,13 +372,13 @@ SPIRV_SOURCE_TYPE ReadSPIRVFile( std::string fileName )
 		source.resize( FILE_SIZE_CONSTANT );
 		file.seekg( 0 );
 		file.read( source.data(), FILE_SIZE_CONSTANT );
+		return source;
 	}
 	else
 		std::cerr << "Error::ReadSPIRVFile( std::string ): SPIRV_SOURCE_TYPE: Failed to open file.\n";
 	file.close();
 	return source;
 }
-
 
 Application::Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate, std::vector< SHADER_SOURCES_TYPE > shaders ) {
 	Initialize( amountOfInstancesToCreate, shaders, windowsToCreate, amountOfWindowsToCreate );
@@ -183,15 +389,15 @@ Application::Application( std::string title, unsigned int width, unsigned int he
 }
 void Application::Initialize( size_t amountOfInstancesToCreate, std::vector< SHADER_SOURCES_TYPE > shaders, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate )
 {
-	instancesAndSurfaces.resize( amountOfInstancesToCreate );
+	instances.resize( amountOfInstancesToCreate );
 	for( unsigned int i = 0; i < amountOfInstancesToCreate; ++i )
 	{
 		if( i < amountOfWindowsToCreate ) {
 			InitializeVulkan( windowsToCreate[ i ].title,
-				instancesAndSurfaces[ i ], shaders[ i ], windowsToCreate[ i ].width, windowsToCreate[ i ].height );
+				instances[ i ], shaders[ i ], windowsToCreate[ i ].width, windowsToCreate[ i ].height );
 		}
 		else
-			InitializeVulkan( DEFAULT_WINDOW_TITLE_CONSTANT, instancesAndSurfaces[ i ], shaders[ 0 ] );
+			InitializeVulkan( DEFAULT_WINDOW_TITLE_CONSTANT, instances[ i ], shaders[ 0 ] );
 	}
 }
 GLFWwindow* Application::InitializeGLFW( unsigned int width, unsigned int height, std::string title )
@@ -246,6 +452,7 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 }
 void Application::CreateInstance( std::string name, const VkInstance& instance )
 {
+	VkInstanceCreateInfo createInfo = {};
 	std::vector< const char* > validationLayers{ "VK_LAYER_KHRONOS_validation" };
 	applicationInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 	applicationInfo.pApplicationName = name.c_str();
@@ -267,7 +474,6 @@ void Application::CreateInstance( std::string name, const VkInstance& instance )
 	enabledExtensions.push_back( VK_KHR_SURFACE_EXTENSION_NAME );
 	enabledExtensions.push_back( PLATFORM_SURFACE_EXTENSION_NAME_MACRO );
 	
-
 	createInfo.enabledExtensionCount = enabledExtensions.size();
 	createInfo.ppEnabledExtensionNames = enabledExtensions.data();
 
@@ -387,6 +593,7 @@ size_t Application::CreateLogicalDevice( const Instance& instance, const VkPhysi
 }
 VkResult Application::InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers, const VkInstance& instance )
 {
+	VkDebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo = {};
 	debugMessengerCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
 	debugMessengerCreateInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
 		VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
@@ -617,19 +824,22 @@ SwapChain& Application::CreateSwapchain( const LogicalDevice& logicalDevice, con
 	return ( ( LogicalDevice& ) logicalDevice ).swapChain;
 }
 
-void Application::CreateShaderModule( LogicalDevice& logicalDevice, const SPIRV_SOURCE_TYPE& source )
+Status Application::CreateShaderModule( LogicalDevice& logicalDevice, const SPIRV_SOURCE_TYPE& source )
 {
-	VkShaderModuleCreateInfo shaderModuleCreationInformation;
+	Status status = FAILURE_ENUMURATION;
+	VkShaderModuleCreateInfo shaderModuleCreationInformation = {};
+	VkShaderModule shaderModule;
 	shaderModuleCreationInformation.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 	shaderModuleCreationInformation.codeSize = source.size();
 	shaderModuleCreationInformation.pCode = reinterpret_cast< const uint32_t* >( source.data() );
-	VkShaderModule shaderModule;
 	if( vkCreateShaderModule( logicalDevice.logicalDevice, &shaderModuleCreationInformation, nullptr, &shaderModule ) == VK_SUCCESS ) {
-		logicalDevice.shaderModules.push_back( shaderModule );
+	//	logicalDevice.shaderModules.push_back( shaderModule );
 		std::cout << "Note::Application::CreateShaderModule( LogicalDevice&, const SPIRV_SOURCE_TYPE& ): void: Successfully created shader module!\n";
+		status = SUCCESS_ENUMURATION;
 	}
 	else
 		std::cerr << "Error::Application::CreateShaderModule( LogicalDevice&, const SPIRV_SOURCE_TYPE& ): void: Failed to create shader module!\n";
+	return status;
 }
 
 bool Application::Update() {
@@ -639,7 +849,7 @@ bool Application::Update() {
 bool Application::GLFWUpdate()
 {
 	bool run = false;
-	for( const Instance& currentInstance : instancesAndSurfaces )
+	for( const Instance& currentInstance : instances )
 	{
 		for( const std::unique_ptr< Surface >& currentSurface : currentInstance.surfaces )
 		{
@@ -664,26 +874,29 @@ void Application::DestroyInstance( const VkInstance& instance )
 
 void Application::Destroy()
 {
-	const size_t AMOUNT_OF_INSTANCES_CONSTANT = instancesAndSurfaces.size();
+	const size_t AMOUNT_OF_INSTANCES_CONSTANT = instances.size();
 	for( unsigned int i = 0; i < AMOUNT_OF_INSTANCES_CONSTANT; ++i )
 	{
-		const size_t AMOUNT_OF_LOGICAL_DEVICES_CONSTANT = instancesAndSurfaces[ i ].logicalDevices.size();
+		const size_t AMOUNT_OF_LOGICAL_DEVICES_CONSTANT = instances[ i ].logicalDevices.size();
 		for( unsigned int j = 0; j < AMOUNT_OF_LOGICAL_DEVICES_CONSTANT; ++j )
 		{
-			for( auto& imageView : instancesAndSurfaces[ i ].logicalDevices[ j ].swapChain.imageViews )
-				vkDestroyImageView( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice, imageView, nullptr );
-			vkDestroySwapchainKHR( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice,
-				instancesAndSurfaces[ i ].logicalDevices[ j ].swapChain.swapChain, nullptr );
-			vkDestroyDevice( instancesAndSurfaces[ i ].logicalDevices[ j ].logicalDevice, nullptr );
+			for( auto& imageView : instances[ i ].logicalDevices[ j ].swapChain.imageViews )
+				vkDestroyImageView( instances[ i ].logicalDevices[ j ].logicalDevice, imageView, nullptr );
+			for( auto& shaderModule : instances[ i ].logicalDevices[ j ].shaderModules )
+				vkDestroyShaderModule( instances[ i ].logicalDevices[ j ].
+					logicalDevice, shaderModule.shaderModule, nullptr );
+			vkDestroySwapchainKHR( instances[ i ].logicalDevices[ j ].logicalDevice,
+					instances[ i ].logicalDevices[ j ].swapChain.swapChain, nullptr );
+			vkDestroyDevice( instances[ i ].logicalDevices[ j ].logicalDevice, nullptr );
 		}
-		const size_t AMOUNT_OF_SURFACES_CONSTANT = instancesAndSurfaces[ i ].surfaces.size();
+		const size_t AMOUNT_OF_SURFACES_CONSTANT = instances[ i ].surfaces.size();
 		for( unsigned int j = 0; j < AMOUNT_OF_SURFACES_CONSTANT; ++j )
 		{
-			vkDestroySurfaceKHR( instancesAndSurfaces[ i ].instance,
-				instancesAndSurfaces[ i ].surfaces[ j ]->surface, nullptr );
-			glfwDestroyWindow( instancesAndSurfaces[ i ].surfaces[ j ]->window );
+			vkDestroySurfaceKHR( instances[ i ].instance,
+				instances[ i ].surfaces[ j ]->surface, nullptr );
+			glfwDestroyWindow( instances[ i ].surfaces[ j ]->window );
 		}
-		DestroyInstance( instancesAndSurfaces[ i ].instance );
+		DestroyInstance( instances[ i ].instance );
 	}
 	glfwTerminate();
 }
