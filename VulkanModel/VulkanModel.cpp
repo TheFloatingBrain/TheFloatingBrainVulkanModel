@@ -64,7 +64,7 @@ struct ReadShaderType
 	ReadShaderType( ShaderType type_ ) :
 		type( type_ ) {
 	}
-	constexpr operator ShaderType() {
+	operator ShaderType() const {
 		return type;
 	}
 };
@@ -117,6 +117,8 @@ const char* SHADER_TYPE_SHORT_STRINGS_CONSTANT[ AMOUNT_OF_SHADER_TYPES_CONSTANT 
 
 using SPIRV_SOURCE_TYPE = std::vector< char >;
 
+SPIRV_SOURCE_TYPE ReadSPIRVFile( std::string filePath );
+
 struct ShaderSourceData
 {
 	char* name;
@@ -124,6 +126,76 @@ struct ShaderSourceData
 	ShaderType shaderType;
 	SPIRV_SOURCE_TYPE shaderSource;
 };
+
+using SHADER_SOURCES_TYPE = std::vector< ShaderSourceData >;
+
+
+template< ReadShaderMethod HOW_TO_READ_CONSTANT, bool provideSourceCode = false >
+struct CreateShaderSourceData
+{
+	ShaderSourceData sourceData;
+	CreateShaderSourceData( ShaderType enumuratedType, const char* filePath, const char* shaderName = nullptr ) : 
+			sourceData{ shaderName, filePath, enumuratedType, ReadSPIRVFile( filePath ) } {
+	}
+	constexpr operator ShaderSourceData() {
+		return sourceData;
+	}
+};
+
+template<>
+struct CreateShaderSourceData< ReadShaderMethod::NON_EXTENSION, false >
+{
+	ShaderSourceData sourceData;
+	CreateShaderSourceData( const char* filePath, const char* shaderName = nullptr ) : 
+		sourceData{ ( char* ) shaderName, ( char* ) filePath, 
+		ReadShaderType< ReadShaderMethod::NON_EXTENSION >( filePath ), ReadSPIRVFile( filePath ) } {
+	}
+	operator ShaderSourceData() const {
+		return sourceData;
+	}
+};
+
+template<>
+struct CreateShaderSourceData< ReadShaderMethod::EXTENSION, false >
+{
+	ShaderSourceData sourceData;
+	CreateShaderSourceData( const char* filePath, const char* shaderName = nullptr ) : 
+		sourceData{ ( char* ) shaderName, ( char* ) filePath,
+		ReadShaderType< ReadShaderMethod::EXTENSION >( filePath ), ReadSPIRVFile( filePath ) } {
+	}
+	operator ShaderSourceData() const {
+		return sourceData;
+	}
+};
+
+template<>
+struct CreateShaderSourceData< ReadShaderMethod::ENUMERATED, true >
+{
+	ShaderSourceData sourceData;
+	CreateShaderSourceData( ShaderType enumuratedType, 
+			SPIRV_SOURCE_TYPE sourceCode, const char* shaderName = nullptr )
+	{
+		sourceData.name = ( char* ) shaderName;
+		sourceData.sourcePath = nullptr;
+		sourceData.shaderType = ReadShaderType< ReadShaderMethod::ENUMERATED >( enumuratedType );
+	}
+	operator ShaderSourceData() const {
+		return sourceData;
+	}
+};
+
+template<>
+struct CreateShaderSourceData< ReadShaderMethod::NON_EXTENSION, true > {
+	ShaderSourceData sourceData;
+	CreateShaderSourceData() = delete;
+};
+
+template<>
+struct CreateShaderSourceData< ReadShaderMethod::EXTENSION, true > {
+	ShaderSourceData sourceData;
+	CreateShaderSourceData() = delete;
+};
+
 
 struct ShaderModule
 {
@@ -136,10 +208,6 @@ enum Status {
 	SUCCESS_ENUMURATION = 0, 
 	FAILURE_ENUMURATION = 1
 };
-
-using SHADER_SOURCES_TYPE = std::vector< ShaderSourceData >;
-
-SPIRV_SOURCE_TYPE ReadSPIRVFile( std::string filePath );
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallBack( VkDebugUtilsMessageSeverityFlagBitsEXT messageSverity,
 		VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* callBackData,
@@ -232,16 +300,24 @@ struct Application
 
 int main( int argc, char** args )
 {
-	std::cout << "Shader type: " << ShaderTypeToString( ReadShaderType< ReadShaderMethod::NON_EXTENSION >( "Shaders/SPIRV/vert.spv" ) ) << "\n";
-	ShaderSourceData vert{ ( char* ) "HelloPrismVertexShader", ( char* ) "Shaders/SPIRV/vert.spv", 
-			VERTEX_SHADER_TYPE_ENUMURATION, ReadSPIRVFile( "Shaders/SPIRV/vert.spv" ) };
-	ShaderSourceData frag{ ( char* ) "HelloPrismFragmentShader", ( char* ) "Shaders/SPIRV/frag.spv", 
-			FRAGMENT_SHADER_TYPE_ENUMURATION, ReadSPIRVFile( "Shaders/SPIRV/frag.spv" ) };
-	Application application{ "Vulkan Example", 800, 600, SHADER_SOURCES_TYPE{ vert, frag } };
+	;
+	Application application{ "Vulkan Example", 800, 600, SHADER_SOURCES_TYPE{ 
+			CreateShaderSourceData< ReadShaderMethod::NON_EXTENSION >(
+			"Shaders/SPIRV/vert.spv", "HelloPrismVertexShader" ), 
+			CreateShaderSourceData< ReadShaderMethod::NON_EXTENSION >(
+			"Shaders/SPIRV/frag.spv", "HelloPrismFragmentShader" ) } 
+			};
 	while( application.Update() );
 	application.Destroy();
 	return 0;
 }
+
+
+/*	ShaderSourceData vert{ ( char* ) "HelloPrismVertexShader", ( char* ) "Shaders/SPIRV/vert.spv",
+			VERTEX_SHADER_TYPE_ENUMURATION, ReadSPIRVFile( "Shaders/SPIRV/vert.spv" ) };
+	ShaderSourceData frag{ ( char* ) "HelloPrismFragmentShader", ( char* ) "Shaders/SPIRV/frag.spv",
+			FRAGMENT_SHADER_TYPE_ENUMURATION, ReadSPIRVFile( "Shaders/SPIRV/frag.spv" ) };*/
+
 
 const std::string DEFAULT_WINDOW_TITLE_CONSTANT = "Vulkan Surface Window";
 
@@ -302,8 +378,9 @@ ShaderType ReadSPIRVShaderTypeFromFileName( std::string fileName, ReadShaderMeth
 	fileName = StripFilePath( fileName );
 	if( howToRead == ReadShaderMethod::NON_EXTENSION )
 	{
-		//(((([^\w\d\s])(%)([^\w\d\s]))|(([^\w\d\s])(%)$)|(^%$)|((^%)([^\w\d\s]))))
 		//OLD: (((([^\w\d\s])(%)([^\w\d\s]))|(([^\w\d\s])(%)$)|(^%$)))
+
+		//(((([^\w\d\s])(%)([^\w\d\s]))|(([^\w\d\s])(%)$)|(^%$)|((^%)([^\w\d\s]))))
 		nameRegex = std::string{ std::string{ "(((([^\\w\\d\\s])(" } +
 				MARKER_CONSTANT + std::string{ ")([^\\w\\d\\s]))|(([^\\w\\d\\s])(" } +
 				MARKER_CONSTANT + std::string{ ")$)|(^" } + 
@@ -880,11 +957,11 @@ void Application::Destroy()
 		const size_t AMOUNT_OF_LOGICAL_DEVICES_CONSTANT = instances[ i ].logicalDevices.size();
 		for( unsigned int j = 0; j < AMOUNT_OF_LOGICAL_DEVICES_CONSTANT; ++j )
 		{
-			for( auto& imageView : instances[ i ].logicalDevices[ j ].swapChain.imageViews )
-				vkDestroyImageView( instances[ i ].logicalDevices[ j ].logicalDevice, imageView, nullptr );
 			for( auto& shaderModule : instances[ i ].logicalDevices[ j ].shaderModules )
 				vkDestroyShaderModule( instances[ i ].logicalDevices[ j ].
 					logicalDevice, shaderModule.shaderModule, nullptr );
+			for( auto& imageView : instances[ i ].logicalDevices[ j ].swapChain.imageViews )
+				vkDestroyImageView( instances[ i ].logicalDevices[ j ].logicalDevice, imageView, nullptr );
 			vkDestroySwapchainKHR( instances[ i ].logicalDevices[ j ].logicalDevice,
 					instances[ i ].logicalDevices[ j ].swapChain.swapChain, nullptr );
 			vkDestroyDevice( instances[ i ].logicalDevices[ j ].logicalDevice, nullptr );
