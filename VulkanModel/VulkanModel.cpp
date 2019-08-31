@@ -30,19 +30,29 @@ const unsigned short NVDIA_VENDOR_ID_CONSTANT = 4318;
 #endif
 //To be continued...//
 
-const size_t AMOUNT_OF_SHADER_TYPES_CONSTANT = 7;
+/***************************************
+* TODO: Find run time friendly way of **
+* supporting extensions in the future! *
+* Requires major overhaul! *************
+***************************************/
+
+const size_t AMOUNT_OF_SHADER_TYPES_CONSTANT = 9;
 
 enum ShaderType
 {
 	VERTEX_SHADER_TYPE_ENUMURATION = 0,
-	FRAGMENT_SHADER_TYPE_ENUMURATION = 1,
 	TESSELLATION_CONTROL_SHADER_TYPE_ENUMURATION = 2,
 	TESSELLATION_EVALUATION_SHADER_TYPE_ENUMURATION = 3,
 	GEOMETRY_SHADER_TYPE_ENUMURATION = 4,
-	COMPUTE_SHADER_TYPE_ENUMURATION = 5, 
+	FRAGMENT_SHADER_TYPE_ENUMURATION = 1,
+	COMPUTE_SHADER_TYPE_ENUMURATION = 5,
 	OTHER_SHADER_TYPE_ENUMURATION = 6,
+	ALL_SHADER_TYPE_ENUMURATION = 7, 
+	ALL_GRAPHICS_SHADER_TYPE_ENUMURATION = 8, 
 	NONE_SHADER_TYPE_ENUMERATION = ( -1 )
 };
+
+const VkShaderStageFlagBits ShaderTypeToShaderStageFlagBit( const ShaderType& shaderType );
 
 const std::string ShaderTypeToString( const ShaderType& shaderType );
 
@@ -97,21 +107,25 @@ struct ReadShaderType< ReadShaderMethod::EXTENSION >
 
 const char* SHADER_TYPE_STRINGS_CONSTANT[ AMOUNT_OF_SHADER_TYPES_CONSTANT ] = { 
 		"vertex", 
-		"fragment", 
 		"tesseleation control", 
 		"tesselation evaluation", 
-		"geometry", 
+		"geometry",
+		"fragment",
 		"compute", 
+		"all", 
+		"all graphics",
 		"other"
 };
 
 const char* SHADER_TYPE_SHORT_STRINGS_CONSTANT[ AMOUNT_OF_SHADER_TYPES_CONSTANT ] = { 
 		"vert", 
-		"frag", 
 		"tesc", 
 		"tese", 
 		"geom", 
-		"comp", 
+		"frag",
+		"comp",
+		"all", 
+		"allg",
 		"other"
 };
 
@@ -128,7 +142,6 @@ struct ShaderSourceData
 };
 
 using SHADER_SOURCES_TYPE = std::vector< ShaderSourceData >;
-
 
 template< ReadShaderMethod HOW_TO_READ_CONSTANT, bool provideSourceCode = false >
 struct CreateShaderSourceData
@@ -199,10 +212,12 @@ struct CreateShaderSourceData< ReadShaderMethod::EXTENSION, true > {
 
 struct ShaderModule
 {
-	char* name;
-	ShaderType shaderType;
+	ShaderSourceData sourceData;
 	VkShaderModule shaderModule;
+	char* entryPoint;
 };
+
+const char* DEFAULT_ENTRY_POINT_NAME_CONSTANT = "main";
 
 enum Status {
 	SUCCESS_ENUMURATION = 0, 
@@ -265,11 +280,14 @@ struct WindowInformation {
 
 struct Application
 {
- 	explicit Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate, std::vector< SHADER_SOURCES_TYPE > shaders );
-	explicit Application( std::string title, unsigned int width, unsigned int height, SHADER_SOURCES_TYPE shaders );
-	void Initialize( size_t amountOfInstancesToCreate, std::vector< SHADER_SOURCES_TYPE > shaders, WindowInformation* windowsToCreate = nullptr, size_t amountOfWindowsToCreate = 0 );
+ 	explicit Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, 
+			size_t amountOfWindowsToCreate, std::vector< SHADER_SOURCES_TYPE > shaders, std::vector< char** > entryPoints = {}  );
+	explicit Application( std::string title, unsigned int width, unsigned int height, SHADER_SOURCES_TYPE shaders, char** entryPoints = nullptr );
+	void Initialize( size_t amountOfInstancesToCreate, std::vector< SHADER_SOURCES_TYPE > shaders, WindowInformation* windowsToCreate = nullptr, 
+			size_t amountOfWindowsToCreate = 0, std::vector< char** > entryPoints = {} );
 	GLFWwindow* InitializeGLFW( unsigned int width, unsigned int height, std::string title );
-	void InitializeVulkan( std::string name, const Instance& instance, SHADER_SOURCES_TYPE shaders, unsigned int width_ = 0, unsigned int height_ = 0 );
+	void InitializeVulkan( std::string name, const Instance& instance, SHADER_SOURCES_TYPE shaders, 
+			unsigned int width_ = 0, unsigned int height_ = 0, char** entryPoints = nullptr );
 	void CreateInstance( std::string name, const VkInstance& instance );
 	void GrabPhysicalDevices( const VkInstance& toGrabFrom );
 	size_t CreateLogicalDevice( const Instance& instance, const VkPhysicalDevice& physicalDevice );
@@ -281,7 +299,9 @@ struct Application
 	void MakeExtent( LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
 	std::vector< VkImage >& GetSwapchainImages( LogicalDevice& logicalDevice );
 	void MakeSwapChainImageViews( LogicalDevice& logicalDevice, SwapChain& swapChain );
-	Status CreateShaderModule( LogicalDevice& logicalDevice, const SPIRV_SOURCE_TYPE& source );
+	ShaderModule CreateShaderModule( LogicalDevice& logicalDevice, const ShaderSourceData& source );
+	//NOTE: Pipeline is created IN ORDER OF SHADER SOURCES SPECIFIED!//
+	void CreateShaderPipelineStages( LogicalDevice& logicalDevice, char** entryPoints = nullptr );
 	bool Update();
 	bool GLFWUpdate();
 	void Destroy();
@@ -312,14 +332,37 @@ int main( int argc, char** args )
 	return 0;
 }
 
-
-/*	ShaderSourceData vert{ ( char* ) "HelloPrismVertexShader", ( char* ) "Shaders/SPIRV/vert.spv",
-			VERTEX_SHADER_TYPE_ENUMURATION, ReadSPIRVFile( "Shaders/SPIRV/vert.spv" ) };
-	ShaderSourceData frag{ ( char* ) "HelloPrismFragmentShader", ( char* ) "Shaders/SPIRV/frag.spv",
-			FRAGMENT_SHADER_TYPE_ENUMURATION, ReadSPIRVFile( "Shaders/SPIRV/frag.spv" ) };*/
-
-
 const std::string DEFAULT_WINDOW_TITLE_CONSTANT = "Vulkan Surface Window";
+
+const VkShaderStageFlagBits ShaderTypeToShaderStageFlagBit( 
+		const ShaderType& shaderType )
+{
+	switch( shaderType )
+	{
+		case VERTEX_SHADER_TYPE_ENUMURATION:
+			return VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT;
+		case TESSELLATION_CONTROL_SHADER_TYPE_ENUMURATION:
+			return VkShaderStageFlagBits::VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+		case TESSELLATION_EVALUATION_SHADER_TYPE_ENUMURATION:
+			return VkShaderStageFlagBits::VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+		case GEOMETRY_SHADER_TYPE_ENUMURATION:
+			return VkShaderStageFlagBits::VK_SHADER_STAGE_GEOMETRY_BIT;
+		case FRAGMENT_SHADER_TYPE_ENUMURATION:
+			return VkShaderStageFlagBits::VK_SHADER_STAGE_FRAGMENT_BIT;
+		case COMPUTE_SHADER_TYPE_ENUMURATION:
+			return VkShaderStageFlagBits::VK_SHADER_STAGE_COMPUTE_BIT;
+		case OTHER_SHADER_TYPE_ENUMURATION:
+			return VkShaderStageFlagBits::VK_SHADER_STAGE_ALL;
+		case ALL_SHADER_TYPE_ENUMURATION:
+			return VkShaderStageFlagBits::VK_SHADER_STAGE_ALL;
+		case ALL_GRAPHICS_SHADER_TYPE_ENUMURATION: 
+			return VkShaderStageFlagBits::VK_SHADER_STAGE_ALL_GRAPHICS;
+		case NONE_SHADER_TYPE_ENUMERATION:
+			return VkShaderStageFlagBits::VK_SHADER_STAGE_ALL;
+		default:
+			return VkShaderStageFlagBits::VK_SHADER_STAGE_ALL;
+	}
+}
 
 const std::string ShaderTypeToString( const ShaderType& shaderType )
 {
@@ -327,18 +370,22 @@ const std::string ShaderTypeToString( const ShaderType& shaderType )
 	{
 		case VERTEX_SHADER_TYPE_ENUMURATION:
 			return "VERTEX_SHADER_TYPE_ENUMURATION";
-		case FRAGMENT_SHADER_TYPE_ENUMURATION:
-			return "FRAGMENT_SHADER_TYPE_ENUMURATION";
 		case TESSELLATION_CONTROL_SHADER_TYPE_ENUMURATION:
 			return "TESSELLATION_CONTROL_SHADER_TYPE_ENUMURATION";
 		case TESSELLATION_EVALUATION_SHADER_TYPE_ENUMURATION:
 			return "TESSELLATION_EVALUATION_SHADER_TYPE_ENUMURATION";
 		case GEOMETRY_SHADER_TYPE_ENUMURATION:
 			return "GEOMETRY_SHADER_TYPE_ENUMURATION";
+		case FRAGMENT_SHADER_TYPE_ENUMURATION:
+			return "FRAGMENT_SHADER_TYPE_ENUMURATION";
 		case COMPUTE_SHADER_TYPE_ENUMURATION:
 			return "COMPUTE_SHADER_TYPE_ENUMURATION";
 		case OTHER_SHADER_TYPE_ENUMURATION:
 			return "OTHER_SHADER_TYPE_ENUMURATION";
+		case ALL_SHADER_TYPE_ENUMURATION:
+			return "ALL_SHADER_TYPE_ENUMURATION";
+		case ALL_GRAPHICS_SHADER_TYPE_ENUMURATION: 
+			return "ALL_GRAPHICS_SHADER_TYPE_ENUMURATION";
 		case NONE_SHADER_TYPE_ENUMERATION:
 			return "NONE_SHADER_TYPE_ENUMERATION";
 		default:
@@ -457,26 +504,40 @@ SPIRV_SOURCE_TYPE ReadSPIRVFile( std::string filePath )
 	return source;
 }
 
-Application::Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate, std::vector< SHADER_SOURCES_TYPE > shaders ) {
-	Initialize( amountOfInstancesToCreate, shaders, windowsToCreate, amountOfWindowsToCreate );
+Application::Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate, 
+		std::vector< SHADER_SOURCES_TYPE > shaders, std::vector< char** > entryPoints ) {
+	Initialize( amountOfInstancesToCreate, shaders, windowsToCreate, amountOfWindowsToCreate, entryPoints );
 }
-Application::Application( std::string title, unsigned int width, unsigned int height, SHADER_SOURCES_TYPE shaders ) {
+
+Application::Application( std::string title, unsigned int width, unsigned int height, 
+		SHADER_SOURCES_TYPE shaders, char** entryPoints ) {
 	WindowInformation windowInformation{ title, width, height };
-	Initialize( 1, std::vector< SHADER_SOURCES_TYPE >{ shaders }, &windowInformation, 1 );
+	Initialize( 1, std::vector< SHADER_SOURCES_TYPE >{ shaders }, &windowInformation, 1, { entryPoints } );
 }
-void Application::Initialize( size_t amountOfInstancesToCreate, std::vector< SHADER_SOURCES_TYPE > shaders, WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate )
+
+void Application::Initialize( size_t amountOfInstancesToCreate, std::vector< SHADER_SOURCES_TYPE > shaders, 
+		WindowInformation* windowsToCreate, size_t amountOfWindowsToCreate, std::vector< char** > entryPoints )
 {
 	instances.resize( amountOfInstancesToCreate );
+	const size_t AMOUNT_OF_ENTRY_POINTS_CONSTANT = entryPoints.size();
+	char** entryPointsForThisInstance = nullptr;
 	for( unsigned int i = 0; i < amountOfInstancesToCreate; ++i )
 	{
-		if( i < amountOfWindowsToCreate ) {
+		if( i < amountOfWindowsToCreate )
+		{
+			if( AMOUNT_OF_ENTRY_POINTS_CONSTANT > 1 )
+				entryPointsForThisInstance = entryPoints[ i ];
 			InitializeVulkan( windowsToCreate[ i ].title,
-				instances[ i ], shaders[ i ], windowsToCreate[ i ].width, windowsToCreate[ i ].height );
+				instances[ i ], shaders[ i ], windowsToCreate[ i ].width, 
+				windowsToCreate[ i ].height, entryPointsForThisInstance );
 		}
-		else
-			InitializeVulkan( DEFAULT_WINDOW_TITLE_CONSTANT, instances[ i ], shaders[ 0 ] );
+		else {
+			InitializeVulkan( DEFAULT_WINDOW_TITLE_CONSTANT, instances[ i ], shaders[ 0 ],
+					windowsToCreate[ 0 ].width, windowsToCreate[ 0 ].height, entryPoints[ 0 ] );
+		}
 	}
 }
+
 GLFWwindow* Application::InitializeGLFW( unsigned int width, unsigned int height, std::string title )
 {
 	glfwInit();
@@ -484,6 +545,7 @@ GLFWwindow* Application::InitializeGLFW( unsigned int width, unsigned int height
 	glfwWindowHint( GLFW_RESIZABLE, GLFW_FALSE );
 	return glfwCreateWindow( width, height, title.c_str(), nullptr, nullptr );
 }
+
 void Application::PrintAvailibleExtensions( const VkInstance& instance )
 {
 	uint32_t extensionCount = 0;
@@ -494,7 +556,9 @@ void Application::PrintAvailibleExtensions( const VkInstance& instance )
 	for(const auto& currentExtension : extensions)
 		std::cout << "\t" << currentExtension.extensionName << "\n";
 }
-void Application::InitializeVulkan( std::string name, const Instance& instance, SHADER_SOURCES_TYPE shaders, unsigned int width, unsigned int height )
+
+void Application::InitializeVulkan( std::string name, const Instance& instance, SHADER_SOURCES_TYPE shaders, 
+		unsigned int width, unsigned int height, char** entryPoints )
 {
 	CreateInstance( name, instance.instance );
 	if( allPhysicalDevices.size() == 0 )
@@ -518,7 +582,8 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 				auto& logicalDevice = instance.logicalDevices[ instance.logicalDevices.size() - 1 ];
 				SwapChain& swapChain = CreateSwapchain( logicalDevice, surface );
 				for( auto& currentShaderData : shaders )
-					CreateShaderModule( ( LogicalDevice& ) logicalDevice, currentShaderData.shaderSource );
+					CreateShaderModule( ( LogicalDevice& ) logicalDevice, currentShaderData );
+				CreateShaderPipelineStages( ( LogicalDevice& ) logicalDevice, entryPoints );
 			}
 			else
 				std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Does Not Support Vulkan!\n";
@@ -527,6 +592,7 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 			std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: Failed to create surface error: " << result << "\n";
 	}
 }
+
 void Application::CreateInstance( std::string name, const VkInstance& instance )
 {
 	VkInstanceCreateInfo createInfo = {};
@@ -566,6 +632,7 @@ void Application::CreateInstance( std::string name, const VkInstance& instance )
 			std::cout << "Note::InitializeVulkan( std::string, const VkInstance& instance ):void: Debug layer creation succesful!\n";
 	}
 }
+
 void Application::GrabPhysicalDevices( const VkInstance& toGrabFrom )
 {
 	VkPhysicalDeviceProperties deviceProperties;
@@ -617,6 +684,7 @@ void Application::GrabPhysicalDevices( const VkInstance& toGrabFrom )
 		allPhysicalDevices[ nvidia ] = toSwap;
 	}
 }
+
 size_t Application::CreateLogicalDevice( const Instance& instance, const VkPhysicalDevice& physicalDevice )
 {
 	uint32_t queueFamilyCount = 0;
@@ -668,6 +736,7 @@ size_t Application::CreateLogicalDevice( const Instance& instance, const VkPhysi
 	( ( Instance& ) instance ).logicalDevices.push_back( LogicalDevice{ logicalDevice, queueFamilyIndex, graphicsFamily, physicalDevice, presentSupport } );
 	return ( instance.logicalDevices.size() - 1 );
 }
+
 VkResult Application::InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers, const VkInstance& instance )
 {
 	VkDebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo = {};
@@ -747,6 +816,7 @@ std::vector< VkSurfaceFormatKHR > Application::FindDesiredFormats( const Logical
 	}
 	return desiredFormats;
 }
+
 std::vector< VkPresentModeKHR > Application::FindDesiredPresentModes( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
 {
 	std::vector< VkPresentModeKHR > desiredPresentModes;
@@ -775,7 +845,6 @@ std::vector< VkPresentModeKHR > Application::FindDesiredPresentModes( const Logi
 		desiredPresentModes.push_back( VK_PRESENT_MODE_FIFO_KHR );
 	return desiredPresentModes;
 }
-
 
 void Application::MakeExtent( LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
 {
@@ -901,22 +970,47 @@ SwapChain& Application::CreateSwapchain( const LogicalDevice& logicalDevice, con
 	return ( ( LogicalDevice& ) logicalDevice ).swapChain;
 }
 
-Status Application::CreateShaderModule( LogicalDevice& logicalDevice, const SPIRV_SOURCE_TYPE& source )
+ShaderModule Application::CreateShaderModule( LogicalDevice& logicalDevice, const ShaderSourceData& source )
 {
-	Status status = FAILURE_ENUMURATION;
 	VkShaderModuleCreateInfo shaderModuleCreationInformation = {};
-	VkShaderModule shaderModule;
+	ShaderModule shaderModule;
+	shaderModule.sourceData = source;
 	shaderModuleCreationInformation.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-	shaderModuleCreationInformation.codeSize = source.size();
-	shaderModuleCreationInformation.pCode = reinterpret_cast< const uint32_t* >( source.data() );
-	if( vkCreateShaderModule( logicalDevice.logicalDevice, &shaderModuleCreationInformation, nullptr, &shaderModule ) == VK_SUCCESS ) {
-	//	logicalDevice.shaderModules.push_back( shaderModule );
+	shaderModuleCreationInformation.codeSize = source.shaderSource.size();
+	shaderModuleCreationInformation.pCode = reinterpret_cast< const uint32_t* >( source.shaderSource.data() );
+	if( vkCreateShaderModule( logicalDevice.logicalDevice, &shaderModuleCreationInformation, nullptr, &shaderModule.shaderModule ) == VK_SUCCESS )
+	{
+		logicalDevice.shaderModules.push_back( shaderModule );
 		std::cout << "Note::Application::CreateShaderModule( LogicalDevice&, const SPIRV_SOURCE_TYPE& ): void: Successfully created shader module!\n";
-		status = SUCCESS_ENUMURATION;
 	}
 	else
 		std::cerr << "Error::Application::CreateShaderModule( LogicalDevice&, const SPIRV_SOURCE_TYPE& ): void: Failed to create shader module!\n";
-	return status;
+	return shaderModule;
+}
+
+void Application::CreateShaderPipelineStages( LogicalDevice& logicalDevice, char** entryPoints )
+{
+	size_t currentModule = 0;
+	if( entryPoints == nullptr )
+	{
+		const size_t AMOUNT_OF_ENTRY_POINTS_CONSTANT = logicalDevice.shaderModules.size();
+		entryPoints = new char*[ AMOUNT_OF_ENTRY_POINTS_CONSTANT ];
+		for( size_t i = 0; i < AMOUNT_OF_ENTRY_POINTS_CONSTANT; ++i )
+			entryPoints[ i ] = ( char* ) DEFAULT_ENTRY_POINT_NAME_CONSTANT;
+	}
+	for( auto& shaderModule : logicalDevice.shaderModules )
+	{
+		VkPipelineShaderStageCreateInfo shaderModuleStageCreationInformation = {};
+		shaderModuleStageCreationInformation.sType = 
+				VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		shaderModuleStageCreationInformation.stage = 
+				ShaderTypeToShaderStageFlagBit( 
+					shaderModule.sourceData.shaderType );
+		shaderModuleStageCreationInformation.module = shaderModule.shaderModule;
+		shaderModuleStageCreationInformation.pName = entryPoints[ currentModule++ ];
+	}
+	std::cout << "Note::Application::CreateShaderPipelineStages( LogicalDevice&, char** ): "
+			"void::Successfully created shader pipeline stages!\n";
 }
 
 bool Application::Update() {
