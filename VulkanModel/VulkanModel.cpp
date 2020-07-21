@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <regex>
+#include <array>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -191,6 +192,7 @@ struct CreateShaderSourceData< ReadShaderMethod::ENUMERATED, true >
 		sourceData.name = ( char* ) shaderName;
 		sourceData.sourcePath = nullptr;
 		sourceData.shaderType = ReadShaderType< ReadShaderMethod::ENUMERATED >( enumuratedType );
+		sourceData.shaderSource = sourceCode;
 	}
 	operator ShaderSourceData() const {
 		return sourceData;
@@ -262,6 +264,8 @@ struct LogicalDevice
 	SwapChain swapChain;
 	VkExtent2D extent;
 	std::vector< ShaderModule > shaderModules;
+	//* TODO: Multiple?//
+	VkPipelineLayout pipelineLayout;
 };
 
 struct Instance
@@ -281,10 +285,13 @@ struct WindowInformation {
 struct Application
 {
  	explicit Application( size_t amountOfInstancesToCreate, WindowInformation* windowsToCreate, 
-			size_t amountOfWindowsToCreate, std::vector< SHADER_SOURCES_TYPE > shaders, std::vector< char** > entryPoints = {}  );
-	explicit Application( std::string title, unsigned int width, unsigned int height, SHADER_SOURCES_TYPE shaders, char** entryPoints = nullptr );
-	void Initialize( size_t amountOfInstancesToCreate, std::vector< SHADER_SOURCES_TYPE > shaders, WindowInformation* windowsToCreate = nullptr, 
-			size_t amountOfWindowsToCreate = 0, std::vector< char** > entryPoints = {} );
+			size_t amountOfWindowsToCreate, std::vector< SHADER_SOURCES_TYPE > shaders, 
+			std::vector< char** > entryPoints = {}  );
+	explicit Application( std::string title, unsigned int width, unsigned int height, 
+			SHADER_SOURCES_TYPE shaders, char** entryPoints = nullptr );
+	void Initialize( size_t amountOfInstancesToCreate, std::vector< SHADER_SOURCES_TYPE > shaders, 
+			WindowInformation* windowsToCreate = nullptr, size_t amountOfWindowsToCreate = 0, 
+			std::vector< char** > entryPoints = {} );
 	GLFWwindow* InitializeGLFW( unsigned int width, unsigned int height, std::string title );
 	void InitializeVulkan( std::string name, const Instance& instance, SHADER_SOURCES_TYPE shaders, 
 			unsigned int width_ = 0, unsigned int height_ = 0, char** entryPoints = nullptr );
@@ -292,16 +299,22 @@ struct Application
 	void GrabPhysicalDevices( const VkInstance& toGrabFrom );
 	size_t CreateLogicalDevice( const Instance& instance, const VkPhysicalDevice& physicalDevice );
 	void PrintAvailibleExtensions( const VkInstance& instance );
-	VkResult InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers, const VkInstance& instance );
-	SwapChain& CreateSwapchain( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
-	std::vector< VkSurfaceFormatKHR > FindDesiredFormats( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
-	std::vector< VkPresentModeKHR > FindDesiredPresentModes( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
+	VkResult InitializeVulkanDebugLayer( 
+			std::vector< const char* >&& validationLayers, const VkInstance& instance );
+	SwapChain& CreateSwapchain( 
+			const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
+	std::vector< VkSurfaceFormatKHR > FindDesiredFormats( 
+			const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
+	std::vector< VkPresentModeKHR > FindDesiredPresentModes( 
+			const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
 	void MakeExtent( LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface );
 	std::vector< VkImage >& GetSwapchainImages( LogicalDevice& logicalDevice );
 	void MakeSwapChainImageViews( LogicalDevice& logicalDevice, SwapChain& swapChain );
 	ShaderModule CreateShaderModule( LogicalDevice& logicalDevice, const ShaderSourceData& source );
 	//NOTE: Pipeline is created IN ORDER OF SHADER SOURCES SPECIFIED!//
 	void CreateShaderPipelineStages( LogicalDevice& logicalDevice, char** entryPoints = nullptr );
+	//TODO: Make it so attributtes can be entered.//
+	void CreateTemporaryFixedFunctionPipeline( const LogicalDevice& logicalDevice ) const;
 	bool Update();
 	bool GLFWUpdate();
 	void Destroy();
@@ -584,6 +597,7 @@ void Application::InitializeVulkan( std::string name, const Instance& instance, 
 				for( auto& currentShaderData : shaders )
 					CreateShaderModule( ( LogicalDevice& ) logicalDevice, currentShaderData );
 				CreateShaderPipelineStages( ( LogicalDevice& ) logicalDevice, entryPoints );
+				CreateTemporaryFixedFunctionPipeline( ( LogicalDevice& ) logicalDevice );
 			}
 			else
 				std::cerr << "Error::InitializeVulkan( std::string name, const Instance& instance, unsigned int width, unsigned int height ):void: GLFW Does Not Support Vulkan!\n";
@@ -737,7 +751,8 @@ size_t Application::CreateLogicalDevice( const Instance& instance, const VkPhysi
 	return ( instance.logicalDevices.size() - 1 );
 }
 
-VkResult Application::InitializeVulkanDebugLayer( std::vector< const char* >&& validationLayers, const VkInstance& instance )
+VkResult Application::InitializeVulkanDebugLayer( 
+		std::vector< const char* >&& validationLayers, const VkInstance& instance )
 {
 	VkDebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo = {};
 	debugMessengerCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -786,7 +801,8 @@ VkResult Application::InitializeVulkanDebugLayer( std::vector< const char* >&& v
 	}
 }
 
-std::vector< VkSurfaceFormatKHR > Application::FindDesiredFormats( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
+std::vector< VkSurfaceFormatKHR > Application::FindDesiredFormats( 
+		const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
 {
 	std::vector< VkSurfaceFormatKHR > desiredFormats;
 	uint32_t formatCount;
@@ -817,7 +833,8 @@ std::vector< VkSurfaceFormatKHR > Application::FindDesiredFormats( const Logical
 	return desiredFormats;
 }
 
-std::vector< VkPresentModeKHR > Application::FindDesiredPresentModes( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
+std::vector< VkPresentModeKHR > Application::FindDesiredPresentModes( 
+		const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
 {
 	std::vector< VkPresentModeKHR > desiredPresentModes;
 	uint32_t presentModeCount;
@@ -901,7 +918,8 @@ void Application::MakeSwapChainImageViews( LogicalDevice& logicalDevice, SwapCha
 	}
 }
 
-SwapChain& Application::CreateSwapchain( const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
+SwapChain& Application::CreateSwapchain( 
+		const LogicalDevice& logicalDevice, const std::unique_ptr< Surface >& surface )
 {
 	if( logicalDevice.presentSuccess == VK_TRUE )
 	{
@@ -978,8 +996,8 @@ ShaderModule Application::CreateShaderModule( LogicalDevice& logicalDevice, cons
 	shaderModuleCreationInformation.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 	shaderModuleCreationInformation.codeSize = source.shaderSource.size();
 	shaderModuleCreationInformation.pCode = reinterpret_cast< const uint32_t* >( source.shaderSource.data() );
-	if( vkCreateShaderModule( logicalDevice.logicalDevice, &shaderModuleCreationInformation, nullptr, &shaderModule.shaderModule ) == VK_SUCCESS )
-	{
+	if( vkCreateShaderModule( logicalDevice.logicalDevice, &shaderModuleCreationInformation, 
+				nullptr, &shaderModule.shaderModule ) == VK_SUCCESS ) {
 		logicalDevice.shaderModules.push_back( shaderModule );
 		std::cout << "Note::Application::CreateShaderModule( LogicalDevice&, const SPIRV_SOURCE_TYPE& ): void: Successfully created shader module!\n";
 	}
@@ -991,13 +1009,12 @@ ShaderModule Application::CreateShaderModule( LogicalDevice& logicalDevice, cons
 void Application::CreateShaderPipelineStages( LogicalDevice& logicalDevice, char** entryPoints )
 {
 	size_t currentModule = 0;
+	const size_t AMOUNT_OF_ENTRY_POINTS_CONSTANT = logicalDevice.shaderModules.size();
 	if( entryPoints == nullptr )
-	{
-		const size_t AMOUNT_OF_ENTRY_POINTS_CONSTANT = logicalDevice.shaderModules.size();
 		entryPoints = new char*[ AMOUNT_OF_ENTRY_POINTS_CONSTANT ];
-		for( size_t i = 0; i < AMOUNT_OF_ENTRY_POINTS_CONSTANT; ++i )
-			entryPoints[ i ] = ( char* ) DEFAULT_ENTRY_POINT_NAME_CONSTANT;
-	}
+	//NOTE: I took these two lines out of brakets for the if without debugging.//
+	for( size_t i = 0; i < AMOUNT_OF_ENTRY_POINTS_CONSTANT; ++i )
+		entryPoints[ i ] = ( char* ) DEFAULT_ENTRY_POINT_NAME_CONSTANT;
 	for( auto& shaderModule : logicalDevice.shaderModules )
 	{
 		VkPipelineShaderStageCreateInfo shaderModuleStageCreationInformation = {};
@@ -1011,6 +1028,149 @@ void Application::CreateShaderPipelineStages( LogicalDevice& logicalDevice, char
 	}
 	std::cout << "Note::Application::CreateShaderPipelineStages( LogicalDevice&, char** ): "
 			"void::Successfully created shader pipeline stages!\n";
+}
+
+/*********************************************************
+* NOTE: There are multiple types of pipelines to create, *
+* create a function for each one? Or maybe a class? ******
+*********************************************************/
+
+void Application::CreateTemporaryFixedFunctionPipeline( const LogicalDevice& logicalDevice ) const
+{
+	VkPipelineVertexInputStateCreateInfo vertexInputInfo = {};
+	VkPipelineInputAssemblyStateCreateInfo assemblyInputInfo = {};
+	VkViewport viewPort = {};
+	VkRect2D scissor = {};
+	VkPipelineViewportStateCreateInfo viewportStateInfo = {};
+	vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	/******************************************************************************************************
+	* NOTE: vertexBindingDescriptions are structures that describe the spacings between vertex data and ***
+	* vertexAttributedDescriptions are the types of verticies being passed to the shader, like in OpenGL. *
+	******************************************************************************************************/
+	vertexInputInfo.vertexBindingDescriptionCount = 0;
+	vertexInputInfo.pVertexBindingDescriptions = nullptr;
+	vertexInputInfo.vertexAttributeDescriptionCount = 0;
+	vertexInputInfo.pVertexAttributeDescriptions = nullptr;
+	assemblyInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	assemblyInputInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	/*******************************************************************
+	* NOTE: If set to VK_TRUE allows _STRIP primative topologies to be *
+	* broken up with special indicies 0xFFFF or 0xFFFFFFFF. ************
+	*******************************************************************/
+	assemblyInputInfo.primitiveRestartEnable = VK_FALSE;
+	viewPort.x = ( float ) logicalDevice.extent.width;
+	viewPort.y = ( float ) logicalDevice.extent.height;
+	viewPort.minDepth = 0.0f;
+	viewPort.maxDepth = 1.0f;
+	scissor.offset = { 0, 0 };
+	scissor.extent = logicalDevice.swapChain.extent;
+	viewportStateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportStateInfo.viewportCount = 1;
+	viewportStateInfo.pViewports = &viewPort;
+	viewportStateInfo.scissorCount = 1;
+	viewportStateInfo.pScissors = &scissor;
+	VkPipelineRasterizationStateCreateInfo rasterizerInfo = {};
+	rasterizerInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	/**********************************************************************
+	* If set to VK_TRUE, instead of discarding things beyond near and far *
+	* planes they will be clamped. ****************************************
+	**********************************************************************/
+	rasterizerInfo.depthClampEnable = VK_FALSE;
+	//If set to VK_TRUE, this will never pass geometry to the rasterizer.//
+	rasterizerInfo.rasterizerDiscardEnable = VK_FALSE;
+	//Using any mode other than "fill" requires enabling a GPU feature.//
+	rasterizerInfo.polygonMode = VK_POLYGON_MODE_FILL;
+	//Any line width higher than 1.0f requires enabling a GPU feature.//
+	/*****************************************************************
+	* TODO: What if features that have constraints such as this were *
+	* tracked and provide diagnostices... interesting library idea. **
+	*****************************************************************/
+	rasterizerInfo.lineWidth = 1.0f;
+	rasterizerInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+	//TODO: Look more into this property... its mathematically interesting.//
+	rasterizerInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
+	rasterizerInfo.depthBiasEnable = VK_FALSE;
+	//<Optional>//
+	rasterizerInfo.depthBiasClamp = 0.0f;
+	rasterizerInfo.depthBiasConstantFactor = 0.0f;
+	rasterizerInfo.depthBiasSlopeFactor = 0.0f;
+	//</Optional>//
+	//NOTE: Helps with anti-aliasing by not drawing overlaping polygons.//
+	VkPipelineMultisampleStateCreateInfo multiSamplingInfo = {};
+	multiSamplingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	multiSamplingInfo.sampleShadingEnable = VK_FALSE;
+	multiSamplingInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	//<Optional>//
+	multiSamplingInfo.minSampleShading = 1.0f;
+	multiSamplingInfo.pSampleMask = nullptr;
+	multiSamplingInfo.alphaToCoverageEnable = VK_FALSE;
+	multiSamplingInfo.alphaToOneEnable = VK_FALSE;
+	//</Optional>//
+	// TODO: NOTE: Ignored depth and stencil testing!! //
+	/*****************************************************************************
+	* NOTE: VkPipelineColorBlendStateCreateInfo describes global color blending, *
+	* VkPipelineColorBlendAttachmentState describes color blending for each ******
+	* attached framebuffer. Blending can be done by bitwise operation or via *****
+	* mixing operation. **********************************************************
+	*****************************************************************************/
+	VkPipelineColorBlendAttachmentState colorBlendAttachmentInfo = {};
+	colorBlendAttachmentInfo.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+			VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | 
+			VK_COLOR_COMPONENT_A_BIT;
+	colorBlendAttachmentInfo.blendEnable = VK_FALSE;
+	//<Optional>//
+	/*********************************************************************
+	* Default: ***********************************************************
+	colorBlendAttachmentInfo.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+	colorBlendAttachmentInfo.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+	colorBlendAttachmentInfo.colorBlendOp = VK_BLEND_OP_ADD;
+	colorBlendAttachmentInfo.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	colorBlendAttachmentInfo.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+	colorBlendAttachmentInfo.alphaBlendOp = VK_BLEND_OP_ADD;
+	**********************************************************************/
+	//Most Common.//
+	colorBlendAttachmentInfo.blendEnable = VK_TRUE;
+	colorBlendAttachmentInfo.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+	colorBlendAttachmentInfo.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	colorBlendAttachmentInfo.colorBlendOp = VK_BLEND_OP_ADD;
+	colorBlendAttachmentInfo.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	colorBlendAttachmentInfo.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+	colorBlendAttachmentInfo.alphaBlendOp = VK_BLEND_OP_ADD;
+	//</Optional>//
+	/*************************************************************************
+	* The following structure can be substituded by nullptr and is optional, *
+	* pre-set parameters can be moved to run time, but have to be ************
+	* resubmitted during draw time. ******************************************
+	*************************************************************************/
+
+	std::array< VkDynamicState, 2 > dynamicStates{
+		VK_DYNAMIC_STATE_VIEWPORT, 
+		VK_DYNAMIC_STATE_LINE_WIDTH
+	};
+
+	VkPipelineDynamicStateCreateInfo dynamicState = {};
+	dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynamicState.dynamicStateCount = dynamicStates.size();
+	dynamicState.pDynamicStates = dynamicStates.data();
+
+	VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
+	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	//<Option>//
+	pipelineLayoutInfo.setLayoutCount = 0;
+	pipelineLayoutInfo.pSetLayouts = nullptr;
+	pipelineLayoutInfo.pushConstantRangeCount = 0;
+	pipelineLayoutInfo.pPushConstantRanges = nullptr;
+	//</Option>//
+
+	if( vkCreatePipelineLayout( logicalDevice.logicalDevice,
+			&pipelineLayoutInfo, nullptr, ( VkPipelineLayout* ) &logicalDevice.pipelineLayout ) != VK_SUCCESS ) {
+		std::cerr << "Error::Application::CreateTemporaryFixedFunctionPipeline( "
+				"const LogicalDevice& ) const:void: Failed to create fixed	pipeline!\n";
+	}
+	else {
+		std::cerr << "Note::Application::CreateTemporaryFixedFunctionPipeline( "
+			"const LogicalDevice& ) const:void: Succsesfully created fixed pipeline!\n";
+	}
 }
 
 bool Application::Update() {
@@ -1058,6 +1218,8 @@ void Application::Destroy()
 				vkDestroyImageView( instances[ i ].logicalDevices[ j ].logicalDevice, imageView, nullptr );
 			vkDestroySwapchainKHR( instances[ i ].logicalDevices[ j ].logicalDevice,
 					instances[ i ].logicalDevices[ j ].swapChain.swapChain, nullptr );
+			vkDestroyPipelineLayout( instances[ i ].logicalDevices[ j ].logicalDevice, 
+					instances[ i ].logicalDevices[ j ].pipelineLayout, nullptr );
 			vkDestroyDevice( instances[ i ].logicalDevices[ j ].logicalDevice, nullptr );
 		}
 		const size_t AMOUNT_OF_SURFACES_CONSTANT = instances[ i ].surfaces.size();
